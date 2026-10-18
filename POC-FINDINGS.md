@@ -97,9 +97,32 @@ Server on 127.0.0.1:879x, bearer-token auth. Durable entries are cursor-addressa
 - **Durable entries arrive via**: attach/overflow `snapshot`, `message_end.entry`, `tool_execution_end.entry`, and placed user submissions (fetched by id from the `submission` event). There is no standalone per-entry live event — SSE must extract entries from those carriers.
 - Cursor semantics: entry ids are monotonic per conversation; server sends strictly `id > cursor`; client-side dedup makes delivery exactly-once across reconnects.
 
-### 4b — Telegram long-polling bot (`poc/06-telegram.mjs`) — **awaiting user's bot token**
-Written and syntax-checked; outbound-only (getUpdates long polling, no inbound ports). Features: chat-bound owner, `requestId = tg-<update_id>` (exactly-once vs Telegram retries), one throttled progress message per run, final answer on `run_end`, blocked sensitive action → inline Approve/Deny buttons → durable decision in the same ApprovalDoc family as Phase 3 → retry instruction.
-**To test end-to-end:** create a bot via @BotFather → `/newbot`, then provide the token (will be stored in gitignored `.env`).
+### 4b — Telegram long-polling bot (`poc/06-telegram.mjs`) — ✅ PASS (2026-10-18, live e2e with @kl_cortex_bot)
+Outbound-only (getUpdates long polling, no inbound ports). Verified end-to-end in a live chat:
+
+| Step | Result |
+|---|---|
+| `/start` → owner chat bound + greeting | ✅ |
+| Task ("create hello.txt … read it back") → `write` + `read` tools → progress edits → final answer posted | ✅ (file verified on disk) |
+| Sensitive action (`dangerous_action`) → blocked by `beforeTool` with approval key | ✅ |
+| Inline Approve/Deny buttons posted for the pending key | ✅ |
+| Text fallback "I approve <key>" → durable decision in ApprovalDoc → retry instruction | ✅ |
+| Agent retries same args → hook sees `approved` → `ACTION EXECUTED` → final answer posted | ✅ |
+
+### Bugs found & fixed during e2e (all in `06-telegram.mjs`)
+1. `watchEvents()` returns a **Promise** — must be awaited before `.start(listener)`.
+2. Approval poller was registered **after the infinite update loop** → never ran → no buttons. Moved registration above the loop.
+3. `postApprovalRequest` silently no-ops when no owner chat is bound yet, but the caller marked the key as posted anyway → button never retried. Now returns a success flag; poller only marks after a real send and retries each tick until the chat is bound; also skips keys whose ApprovalDoc already has a recorded decision (avoids re-posting old buttons after restart).
+4. No text path for approvals — users naturally type "I approve <key>" instead of tapping buttons. Added `parseApprovalText` (approve/deny + 12-hex key) sharing the same `recordApproval` as the button callback.
+5. Progress-message lifecycle: housekeeping events after `run_end` created a stray "⏳ thinking…" line that never cleared. Fixed by gating progress edits on `run_start`/`run_end` (`inRun` flag) and deleting the progress line at `run_end`.
+
+### MVP notes from e2e
+- Owner chat binding is in-memory: after a restart the first message re-binds (and re-greets). Persist `ownerChatId` in a doc for production.
+- Telegram purges updates once any client polls past them — a restart cannot replay pre-restart messages. Durable state (SQLite) is the source of truth, not the update queue.
+- Harmless log noise: throttled progress edits occasionally hit "message is not modified" (identical status line) — expected, caught.
+
+### Approval semantics observed in live use (design decision for MVP)
+- Approval keys are `sha1(tool + exact args)` and a recorded `approved` decision **persists for that exact action** — re-running `dangerous_action({message: "cortex test 123"})` after approval executed again without a new approval. This is what makes crash-retry idempotent, but approvals are *per distinct action*, not *per execution*. The model itself predicted the opposite ("a new run will require fresh approval") — for MVP consider per-execution keys (nonce) or an explicit `/revoke <key>`, and align the block-message wording with the actual semantics.
 
 ## Phase 5 — Sandbox execution env ✅ PASS (2026-10-18)
 

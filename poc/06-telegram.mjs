@@ -53,18 +53,25 @@ async function tg(method, payload = {}) {
 // --- event stream → progress message + final answer on run_end ---
 let progressMsgId = null;
 let lastEditAt = 0;
+let inRun = false;
 
 async function startRunWatcher() {
   const stream = await watchEvents(h, root.id, ctx);
   stream.start(async (events) => {
     for (const ev of events) {
       try {
+        if (ev.type === "run_start") {
+          inRun = true;
+          progressMsgId = null; // fresh progress message per run
+          continue;
+        }
         if (ev.type === "run_end") {
           // Clear the stale progress line so the chat doesn't look stuck; the final answer follows.
           if (progressMsgId !== null && ownerChatId) {
             await tg("deleteMessage", { chat_id: ownerChatId, message_id: progressMsgId }).catch(() => {});
           }
-          progressMsgId = null; // next run gets a fresh progress message
+          progressMsgId = null;
+          inRun = false; // housekeeping events after run_end must not create a new line
           const page = await root.commit((tx) => tx.scanEntries({ conversationId: root.id }, 10), ctx);
           const latest = page.items.find((i) => (i.kind ?? "") === "pi.assistant");
           const text = (latest?.model?.[0]?.content ?? [])
@@ -74,6 +81,7 @@ async function startRunWatcher() {
           if (text.trim()) await postFinalAnswer(text);
           continue;
         }
+        if (!inRun) continue;
         const now = Date.now();
         if (now - lastEditAt < 2000) continue; // throttle edits (~Telegram rate limits)
         let statusLine = "thinking…";
