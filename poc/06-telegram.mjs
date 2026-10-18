@@ -21,6 +21,14 @@ if (!TOKEN) {
 }
 const API = `https://api.telegram.org/bot${TOKEN}`;
 
+// Access control: only these numeric Telegram user IDs may use the bot (comma-separated).
+// Empty list = first-come binding (PoC mode); set it to lock the bot to specific accounts.
+const ALLOWED_TELEGRAM_IDS = (process.env.ALLOWED_TELEGRAM_IDS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .map(Number);
+
 const ctx = BACKGROUND_CONTEXT;
 const WORK = fileURLToPath(new URL("./work", import.meta.url));
 
@@ -248,6 +256,12 @@ while (true) {
     offset = u.update_id + 1;
     if (u.message) {
       const chatId = u.message.chat.id;
+      const fromId = u.message.from?.id;
+      console.log(`update ${u.update_id}: msg from=${fromId} chat=${chatId}`);
+      if (ALLOWED_TELEGRAM_IDS.length > 0 && !ALLOWED_TELEGRAM_IDS.includes(fromId)) {
+        await tg("sendMessage", { chat_id: chatId, text: "This bot is private." }).catch(() => {});
+        continue;
+      }
       if (ownerChatId === null) {
         ownerChatId = chatId;
         await tg("sendMessage", { chat_id: chatId, text: "Project brain online. Send me a task." }).catch(() => {});
@@ -269,6 +283,7 @@ while (true) {
       void sub;
     } else if (u.callback_query) {
       const { data, from } = u.callback_query;
+      if (ALLOWED_TELEGRAM_IDS.length > 0 && !ALLOWED_TELEGRAM_IDS.includes(from?.id)) continue;
       await tg("answerCallbackQuery", { callback_query_id: u.callback_query.id }).catch(() => {});
       const [decision, key] = data.split(":");
       if (key && ["approve", "deny"].includes(decision)) {
