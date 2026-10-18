@@ -121,6 +121,24 @@ Written and syntax-checked; outbound-only (getUpdates long polling, no inbound p
 - **Containment guard pitfall**: canonicalizing a *new* file's full path fails (`realpath` ENOENT) — must canonicalize the deepest *existing* ancestor and check containment on the lexical remainder. (Fixed in `#guard`.)
 - No host env vars cross into the container (`podman exec` inherits container env only); workspace is the only mount.
 
+## Phase 6 — Compaction on a local model ✅ PASS (2026-10-18)
+
+`poc/08-compaction.mjs` (manual) + `poc/09-compaction-background.mjs` (natural threshold). Because the real window is 228k (threshold compaction would need ~150k+ tokens of conversation to fire), the tests use a deliberately small catalog window — the machinery is identical at any size.
+
+| Test | Result |
+|---|---|
+| Manual `root.compact(instructions)` → summary placed via write submission, CompactionEntry reason=manual | ✅ |
+| Post-compaction recall: all 6 instructed facts retained verbatim (6/6) | ✅ |
+| Conversation continues without interruption after compaction | ✅ |
+| Natural threshold compaction: **7 fired** over 10 turns (reason=threshold), no stalled run | ✅ |
+| Post-compaction answer still correct ("twelve hours") | ✅ |
+
+### Design & findings (important for production sizing)
+- **pi-ai reserves a fixed 4096-token safety margin** (`CONTEXT_SAFETY_TOKENS` in `simple-options.js`): effective output room = `contextWindow − estimated_prompt − 4096`, clamped to ≥1. If the harness compaction threshold sits *above* where this hits ~0, generation silently degrades to 1-token answers (stopReason=length) that are still classified **completed** — truncated answers pass through as done.
+- Rule of thumb: **`reserveTokens` must exceed 4096 + margin**. With the real 228k window and default policy (reserve 16384), the harness compacts at ~211.6k while pi-ai's floor is ~223.9k — safe as-is.
+- Compaction summary budget = `min(0.8 × reserveTokens, model.maxTokens)`; with a thinking-heavy local model, keep this generous (thinking eats the budget before any summary text).
+- The RCO variant emits `reasoning_content` even with `thinkingLevel: "off"` — output budgets must assume thinking overhead (~300–900 tokens/turn observed).
+
 ## Assumption tracker
 
 | ID | Status | Notes |
@@ -128,7 +146,7 @@ Written and syntax-checked; outbound-only (getUpdates long polling, no inbound p
 | A1 model agentic reliability | ✅ verified Ph.1 (0/3 self-corrected errors); injection probe still pending (Ph.7). Caveat: one toolset hallucination — mitigate via explicit capability notes | |
 | A2 pi-ai ↔ Unsloth integration | ✅ verified: custom openai-completions provider works; gotchas documented in Phase 1 findings | |
 | A3 durability (resume/exactly-once) | ✅ verified: SIGKILL→resume recovers, no silent re-run; requestId exactly-once confirmed. In-flight tools surface as explicit interrupted errors | |
-| A4 compaction on local model | ⏳ pending (Phase 6) | ctx 228k known now |
+| A4 compaction on local model | ✅ verified Ph.6: manual + natural threshold compaction both work; recall intact. Sizing rule: reserveTokens > 4096 (pi-ai safety margin); default policy safe at 228k |
 | A5 subagent pattern | ✅ verified: parallel fan-out, per-role tool restrictions, owned worker conversations; task defs must be registered via extension tasks: | |
 | A6 approval hook + memo | ✅ verified: beforeTool block → durable decision in session doc family → retry allowed; survives mid-run SIGKILL. Agent cannot self-approve (only driver writes decisions) | |
 | A7 sandbox ExecutionEnv | ✅ verified: per-conversation Podman container, no host secrets, egress-limited, coexists with local env. Guard pitfall: canonicalize deepest existing ancestor | |

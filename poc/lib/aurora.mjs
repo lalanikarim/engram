@@ -19,7 +19,7 @@ export function auroraModelId(cfg = loadAuroraConfig()) {
   return cfg.models[0].id;
 }
 
-export function auroraModels() {
+export function auroraModels(overrides = {}) {
   const cfg = loadAuroraConfig();
   // envApiKeyAuth resolves from the environment at request time
   process.env.UNSLOTH_KEY = cfg.apiKey;
@@ -39,8 +39,8 @@ export function auroraModels() {
         reasoning: Boolean(m.reasoning),
         input: m.input ?? ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, // local model — no $ cost
-        contextWindow: m.contextWindow ?? 200000,
-        maxTokens: m.maxTokens ?? 32000,
+        contextWindow: overrides.contextWindow ?? m.contextWindow ?? 200000,
+        maxTokens: overrides.maxTokens ?? m.maxTokens ?? 32000,
       })),
       api: openAICompletionsApi(),
     }),
