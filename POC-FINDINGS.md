@@ -41,16 +41,54 @@ Setup: `poc/01-core.mjs` + `poc/lib/aurora.mjs` (pi-ai custom provider) + `poc/l
 - **Env cwd must be absolute** — a relative `./work` resolved against the wrong base ("working directory does not exist: .../work/work").
 - **Latency (A10 data point)**: full agentic turns took 3–9s on the 4090 — faster than expected; Unsloth is fast enough for interactive use. Token spend per task was small (in/out ≈ 1.1k/0.3k, 1.2k/0.75k, 1.3k/0.84k).
 
+## Phase 2 — Durability (crash recovery + exactly-once) ✅ PASS (2026-10-18)
+
+Test: `poc/02-durable.mjs` — task with a 15s in-flight bash call; parent process `kill -9` mid-sleep; fresh process reopens same SQLite.
+
+| Test | Result |
+|---|---|
+| SIGKILL mid-run → reopen + `resume()` + wait on same submission | ✅ PASS — status=done 23.5s after restart; `done.txt` created; no lost work |
+| In-flight tool call at crash point | Recorded as explicit **interrupted** error result ("Tool bash was interrupted and may have partially run"), surfaced to the model, which retried once and succeeded — **no silent re-run** |
+| Double-submit same `requestId` | ✅ PASS — second submit returned the identical submission id (8==8); exactly one user entry in transcript |
+
+### Findings
+- **A3 verified.** Recovery semantics: completed work is never lost or silently re-executed; an in-flight tool call at crash time becomes an explicit `interrupted` diagnostic result, and the *model* decides whether to retry. This matches the PLAN.md design (per-tool replay policies).
+- **MVP implication**: side-effecting tools (e.g., anything mutating external state) need idempotency keys / per-tool replay policy so a model-initiated retry after interruption is safe. Read-only tools are trivially safe.
+
+## Phase 3 — Subagents + approval gating ✅ PASS (2026-10-18)
+
+### 3a — Subagents (`poc/03-subagents.mjs`, `poc/lib/worker.mjs`)
+Orchestrator (root conversation, tools = `[delegate]` only) delegates two jobs in one parallel fan-out:
+- researcher → own conversation, tools = `[web_fetch]` only → fetched example.com ✓
+- worker → own conversation, tools = `[read,write,edit,bash]` → created `subagent.txt` ✓
+
+**Result: PASS in 12.4s.** Both results returned to the orchestrator; side effect verified on disk.
+
+### 3b — Approval hook + durable decision (`poc/04-approval.mjs`, `poc/lib/approvals.mjs`)
+Flow: model calls `dangerous_action` → `beforeTool` hook blocks with approval key (sha1 of tool+args, stable across retries) → driver (standing in for Telegram inline button) writes `{decision:"approved"}` into a session doc family → model retries same args → hook sees approved → action executes.
+
+| Test | Result |
+|---|---|
+| Happy path: block → approve → retry → executed | ✅ PASS, exactly one execution |
+| **True mid-run SIGKILL** while approval pending → restart → recover | ✅ PASS — in-flight run resumed; approval key found in durable transcript; approved after restart; action executed once |
+
+### Findings & API gotchas (now encoded in the PoC libs)
+- **Task definitions must be registered** via an extension's `tasks:` array — a task created by name but not installed → scheduler blocks with `missing_task`.
+- **`runtime.commit()` callback must return a NextTaskState or undefined** — returning anything else (e.g. an id) corrupts the task state write (SQLite bind error).
+- **No `tx.snapshot()`** inside commits; use `runtime.registry` outside the commit for registry reads.
+- **Approval key = f(tool, args)**, not call id: a retry gets a new callId, so decisions must key on stable action identity. Decisions live in a session doc family (writable by the app/driver, readable by hooks via `api.snapshot`) — task memos are invocation-writable only, so they can't carry external approvals.
+- **Node exits when the event loop drains** even with durable work pending (all parked on watches) — harmless for durability (reopen + resume continues), but long-lived drivers must keep something active or accept restarts.
+
 ## Assumption tracker
 
 | ID | Status | Notes |
 |----|--------|-------|
 | A1 model agentic reliability | ✅ verified Ph.1 (0/3 self-corrected errors); injection probe still pending (Ph.7). Caveat: one toolset hallucination — mitigate via explicit capability notes | |
 | A2 pi-ai ↔ Unsloth integration | ✅ verified: custom openai-completions provider works; gotchas documented in Phase 1 findings | |
-| A3 durability (resume/exactly-once) | ⏳ pending (Phase 2) | |
+| A3 durability (resume/exactly-once) | ✅ verified: SIGKILL→resume recovers, no silent re-run; requestId exactly-once confirmed. In-flight tools surface as explicit interrupted errors | |
 | A4 compaction on local model | ⏳ pending (Phase 6) | ctx 228k known now |
-| A5 subagent pattern | ⏳ pending (Phase 3) | |
-| A6 approval hook + memo | ⏳ pending (Phase 3) | |
+| A5 subagent pattern | ✅ verified: parallel fan-out, per-role tool restrictions, owned worker conversations; task defs must be registered via extension tasks: | |
+| A6 approval hook + memo | ✅ verified: beforeTool block → durable decision in session doc family → retry allowed; survives mid-run SIGKILL. Agent cannot self-approve (only driver writes decisions) | |
 | A7 sandbox ExecutionEnv | ⏳ pending (Phase 5) | Docker daemon must be running |
 | A8 clients (SSE + Telegram) | ⏳ pending (Phase 4) | |
 | A9 web_fetch + injection hygiene | 🟡 tool works with untrusted delimiters (Ph.1); adversarial probe pending (Ph.7) | |
