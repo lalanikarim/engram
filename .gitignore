@@ -1,0 +1,16 @@
+# deps
+node_modules/
+
+# secrets — never commit API keys
+.env
+*.env.local
+
+# runtime data (harness storage, working dirs, sandbox artifacts)
+poc/data/
+poc/work/
+poc/sandbox-test/
+*.sqlite
+*.sqlite-*
+
+# os noise
+.DS_Store

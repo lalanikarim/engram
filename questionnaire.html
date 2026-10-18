@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pi Durable Build — Brainstorm Questionnaire</title>
+<style>
+  :root {
+    --bg: #fafbfc; --panel: #ffffff; --ink: #1a202c; --ink-soft: #4a5568; --ink-faint: #8a94a6;
+    --accent: #2f6feb; --accent-soft: #eaf1fd; --green: #1f8a4c; --border: #e2e8f0;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; font-size: 15px; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 90px; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10; background: rgba(250,251,252,.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; gap: 14px;
+  }
+  header.top .title { font-weight: 700; font-size: 15px; }
+  header.top .progress { flex: 1; font-size: 13px; color: var(--ink-soft); }
+  .bar { height: 6px; background: #e2e8f0; border-radius: 999px; overflow: hidden; min-width: 120px; max-width: 220px; }
+  .bar > div { height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+
+  h1 { font-size: 26px; margin: 28px 0 6px; letter-spacing: -0.3px; }
+  p.intro { color: var(--ink-soft); margin: 0 0 24px; }
+
+  section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 22px; }
+  section.card h2 { font-size: 18px; margin: 0 0 4px; }
+  section.card .sub { font-size: 13px; color: var(--ink-faint); margin: 0 0 14px; }
+
+  .q { margin: 16px 0; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .q:first-of-type { border-top: none; padding-top: 0; }
+  .q .qlabel { font-weight: 600; margin-bottom: 8px; }
+  .q .qlabel .qid { color: var(--accent); font-family: var(--mono); font-size: 13px; margin-right: 6px; }
+  .q .hint { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 6px; }
+
+  label.opt { display: flex; gap: 9px; align-items: flex-start; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 14.5px; }
+  label.opt:hover { background: #f3f6fb; }
+  label.opt input { margin-top: 3px; accent-color: var(--accent); }
+  label.opt .desc { color: var(--ink-soft); font-size: 12.5px; display: block; }
+
+  textarea, input[type=text] {
+    width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff;
+  }
+  textarea { min-height: 64px; resize: vertical; }
+  .extra { margin-top: 8px; }
+  .extra label { font-size: 13px; color: var(--ink-soft); display: block; margin-bottom: 4px; }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 26px; }
+  button {
+    font: inherit; font-weight: 600; border-radius: 9px; padding: 10px 18px; cursor: pointer;
+    border: 1px solid var(--border); background: #fff; color: var(--ink);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: #b91c1c; }
+  button:active { transform: translateY(1px); }
+
+  #outputPanel { display: none; margin-top: 26px; }
+  #outputPanel h3 { margin: 0 0 8px; font-size: 16px; }
+  #outputBox {
+    width: 100%; min-height: 320px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5;
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: #0f172a; color: #e2e8f0; resize: vertical;
+  }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #166534; color: #fff; padding: 9px 18px; border-radius: 999px; font-size: 13.5px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  footer { margin-top: 40px; font-size: 12.5px; color: var(--ink-faint); text-align: center; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="title">Pi Durable Brainstorm</span>
+  <span class="progress"><span id="count">0 / 0 answered</span></span>
+  <div class="bar"><div id="barFill"></div></div>
+  <button class="primary" onclick="generate()">Generate response</button>
+</header>
+
+<div class="wrap">
+  <h1>What do we build with Pi Durable?</h1>
+  <p class="intro">Answer what you're sure about — <em>unanswered</em> is a valid answer and shapes the MVP. Your progress saves automatically in this browser. When done, hit <strong>Generate response</strong> and paste the result back to me.</p>
+
+  <div id="questions"></div>
+
+  <div class="actions">
+    <button class="primary" onclick="generate()">Generate response</button>
+    <button onclick="resetAll()">Reset all answers</button>
+  </div>
+
+  <div id="outputPanel">
+    <h3>Your response (paste this back to me)</h3>
+    <textarea id="outputBox" readonly spellcheck="false"></textarea>
+    <div class="actions">
+      <button class="primary" onclick="copyOutput()">Copy to clipboard</button>
+      <button onclick="downloadMd()">Download .md</button>
+      <button onclick="copyShareLink()">Copy share link</button>
+    </div>
+  </div>
+
+  <footer>Companion files: BRAINSTORM.md (source questionnaire) · INVESTIGATION.md · report.html</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- Question definitions ----------
+// type: radio | check | text. options: [key, label, description?]
+const QUESTIONS = [
+  { section: "A", title: "What we build (purpose & scope)", items: [
+    { id: "A1", out: "primary purpose", type: "radio", label: "Primary purpose of the agent", options: [
+      ["coding", "Autonomous coding agent", "fixes, refactors, tests on repos"],
+      ["chatbot", "Team chat bot", "Slack/Discord/Telegram — channel = conversation, threads = forks"],
+      ["cicd", "CI/CD integration", "PR reviews, test triage, build fixes; gates wait on results"],
+      ["research", "Research / analysis pipeline", "multi-agent: scout → writer → reviewer"],
+      ["assistant", "Personal assistant / project brain", "long-lived context, memory, scheduled jobs"],
+      ["ops", "Ops agent with approval gates", "deploys, incidents — human approves dangerous steps"],
+      ["other", "Other"],
+    ], other: { key: "A1o", placeholder: "Describe the purpose…" } },
+
+    { id: "A2", out: "users", type: "radio", label: "Who will use it?", options: [
+      ["solo", "Just me"],
+      ["team", "Me + 1–5 people (team/family)"],
+      ["many", "Many users / external clients"],
+      ["machines", "Non-human clients primarily (CI, webhooks, other agents)"],
+    ] },
+
+    { id: "A3", out: "work types", type: "check", label: "What kind of work should it do?", options: [
+      ["read", "Read/analyze code and answer questions"],
+      ["edit", "Edit code + run tests/builds locally"],
+      ["shell", "Shell / system administration"],
+      ["web", "Web research / browsing"],
+      ["data", "Data analysis (databases, files, spreadsheets)"],
+      ["comms", "Communication (drafting messages, triaging tickets/issues)"],
+      ["monitor", "Monitoring & scheduled checks (\u201cverify X daily\u201d, \u201calert if Y\u201d)"],
+    ], extras: [ { key: "A3o", label: "Other work types", placeholder: "…" } ] },
+
+    { id: "A4", out: "autonomy", type: "radio", label: "Autonomy level", options: [
+      ["full", "Fully autonomous — acts within its sandbox"],
+      ["gated", "Autonomous, but dangerous/external actions require human approval (hooks + memos)"],
+      ["hil", "Human-in-the-loop throughout — I steer at each step"],
+      ["mixed", "Mixed: autonomous for routine work, approval for the rest"],
+    ] },
+
+    { id: "A5", out: "task duration", type: "radio", label: "Expected run duration of a typical task", options: [
+      ["minutes", "Minutes"],
+      ["hours", "Hours (overnight runs matter)"],
+      ["days", "Days — must survive machine sleep/reboots mid-task"],
+      ["indefinite", "Indefinite / standing conversations (weeks+, with compaction)"],
+    ] },
+
+    { id: "A6", out: "concurrency", type: "radio", label: "Concurrency needs", options: [
+      ["one", "One conversation at a time is fine"],
+      ["few", "A few parallel conversations (e.g., one per project/ticket)"],
+      ["many", "Many concurrent users/threads on shared conversations"],
+      ["subagents", "Parallel subagent workstreams inside one task"],
+    ] },
+
+    { id: "A7", out: "multi-agent", type: "radio", label: "Do we need multi-agent workflows (subagents, chains, pipelines)?", options: [
+      ["no", "No — single agent with tools is enough"],
+      ["occasional", "Yes — occasional fan-out (e.g., parallel research)"],
+      ["core", "Yes — core to the design (orchestrator + specialized workers)"],
+    ], extras: [ { key: "A7d", label: "Details (if yes)", placeholder: "What pipelines/workflows?" } ] },
+
+    { id: "A8", out: "tools", type: "check", label: "Tools the agent needs", hint: "Built-in read/write/edit/bash + codemode are given.", options: [
+      ["search", "Web search / fetch"],
+      ["browser", "Browser automation (forms, JS-heavy sites)"],
+      ["db", "Databases (Postgres/SQLite/etc.)"],
+      ["lan", "Internal APIs / services on my network"],
+      ["git", "Git hosting API (GitHub/GitLab — issues, PRs, webhooks)"],
+      ["image", "Image generation / image understanding"],
+      ["voice", "Voice (TTS/STT)"],
+    ], extras: [
+      { key: "A8mcp", label: "MCP servers you already use", placeholder: "e.g. github, puppeteer, postgres…" },
+      { key: "A8o", label: "Other tools", placeholder: "…" },
+    ] },
+
+    { id: "A9", out: "memory", type: "radio", label: "Memory beyond the conversation transcript", options: [
+      ["none", "None — transcript + compaction is enough"],
+      ["notes", "Persistent curated notes (preferences, projects, decisions) → documents"],
+      ["kb", "Searchable knowledge base (my docs, project wikis)"],
+      ["vector", "Vector/semantic memory (embeddings over a corpus)"],
+    ] },
+  ]},
+
+  { section: "B", title: "How we host it", items: [
+    { id: "B1", out: "where", type: "radio", label: "Where does it run?", options: [
+      ["laptop", "My laptop (fine if it sleeps — resumes when I'm back)"],
+      ["homeserver", "Always-on home server / spare machine (Mac mini, Pi 5, …)"],
+      ["nas", "NAS (Synology/QNAP containers)"],
+      ["k8slocal", "Local Kubernetes (kind/minikube/k3s)"],
+      ["k8scloud", "Managed cloud k8s (GKE/EKS)"],
+      ["paas", "PaaS (Vercel durable-harness / Cloudflare Durable Objects)"],
+      ["other", "Other"],
+    ], other: { key: "B1o", placeholder: "Where?" } },
+
+    { id: "B2", out: "availability", type: "radio", label: "Availability expectation", options: [
+      ["on", "While the machine is on — that's enough"],
+      ["247", "24/7 on one box (auto-restart on crash)"],
+      ["failover", "24/7 with failover to another machine (needs Postgres-backed storage or Temporal)"],
+    ] },
+
+    { id: "B3", out: "packaging", type: "radio", label: "Packaging preference", options: [
+      ["bare", "Bare Node process + pm2/launchd/systemd"],
+      ["docker", "Single Docker container"],
+      ["compose", "Docker Compose (agent + UI + supporting services)"],
+      ["k8s", "Kubernetes Deployment + PVCs"],
+    ] },
+
+    { id: "B4", out: "storage", type: "radio", label: "Storage backend", options: [
+      ["sqlite", "SQLite (built-in, simplest — accept last-commit loss on hard power failure)"],
+      ["postgres", "Postgres-backed custom storage (stronger durability / multi-Pod HA — extra build work)"],
+      ["jsonl", "JSONL (built-in, simple, append-only)"],
+      ["dnc", "Don't care yet"],
+    ] },
+
+    { id: "B5", out: "tool execution", type: "radio", label: "Where do the agent's tools execute?", options: [
+      ["host", "Directly on the host filesystem (NodeExecutionEnv)"],
+      ["container", "Docker container per conversation (custom ExecutionEnv — isolation)"],
+      ["remote", "Remote machine(s) over the network (RemoteExecutionEnv pattern)"],
+      ["cloud", "Cloud sandboxes (Vercel Sandbox / Modal / Daytona style)"],
+      ["mix", "Mix: local for dev, sandboxed for untrusted clients"],
+    ] },
+
+    { id: "B6", out: "agent count", type: "radio", label: "How many independent agents do we want?", options: [
+      ["one", "One agent"],
+      ["few", "A few (e.g., coding + research + ops), each its own storage/Pod"],
+      ["many", "Many / dynamic — spawn per project or ticket"],
+    ] },
+
+    { id: "B7", out: "budget & constraints", type: "text", label: "Budget & constraints", placeholder: "e.g. \u201clocal only, no cloud spend\u201d / \u201c~$20/mo fine\u201d / \u201chave a GPU box I want to use for local models\u201d" },
+  ]},
+
+  { section: "C", title: "How we access it (clients)", items: [
+    { id: "C1", out: "primary surface", type: "radio", label: "Primary client surface", options: [
+      ["webui", "Web UI in the browser"],
+      ["tui", "Terminal TUI (built on pi's TUI components, like the vacation-planner demo)"],
+      ["chat", "Chat platform bot"],
+      ["ide", "IDE integration (VS Code sidebar)"],
+      ["api", "API only — I drive it from scripts/other tools"],
+    ], extras: [ { key: "C1b", label: "If chat platform, which?", placeholder: "Slack / Discord / Telegram / …", when: { q: "C1", value: "chat" } } ] },
+
+    { id: "C2", out: "additional surfaces", type: "check", label: "Additional surfaces", options: [
+      ["mobile", "Mobile (app or gateway like SMS/WhatsApp)"],
+      ["email", "Email (email the agent, get replies by email)"],
+      ["cicd", "CI/CD (GitHub Actions / GitLab jobs submitting tasks)"],
+      ["a2a", "Other agents driving it (agent-to-agent; MCP bridge)"],
+      ["dash", "Dashboards (costs, todos, run status — read-only)"],
+      ["cron", "Scheduled/cron submissions from scripts"],
+    ] },
+
+    { id: "C3", out: "simultaneous humans", type: "radio", label: "How many humans use it at the same time?", options: [
+      ["1", "1"], ["25", "2–5"], ["many", "Many / unknown"],
+    ] },
+
+    { id: "C4", out: "interaction style", type: "radio", label: "Interaction style", options: [
+      ["fifo", "Fire-and-forget: submit task, get result later"],
+      ["steer", "Live steering: I watch it work and redirect mid-run (whenBusy: steer)"],
+      ["multi", "Multiplayer co-steering: several people steer the same live conversation"],
+      ["mixed", "Mixed"],
+    ] },
+
+    { id: "C5", out: "streaming", type: "radio", label: "Streaming needs", options: [
+      ["final", "Final results only (poll or notify on completion)"],
+      ["live", "Live progress stream (tool output, partial answers) — SSE/WebSocket"],
+      ["both", "Both, per client"],
+    ] },
+
+    { id: "C6", out: "exposure & auth", type: "radio", label: "Network exposure & auth", options: [
+      ["lan", "Localhost / trusted LAN only"],
+      ["tailscale", "Tailscale tailnet (private VPN; recommended default)"],
+      ["public", "Public internet with token auth"],
+      ["sso", "SSO / existing identity provider"],
+    ], extras: [ { key: "C6n", label: "Notes", placeholder: "…" } ] },
+
+    { id: "C7", out: "must-integrate systems", type: "text", label: "Which existing systems must it integrate with?", placeholder: "e.g. GitHub, a ticket tracker, home lab services, specific APIs, email accounts, calendars" },
+  ]},
+
+  { section: "D", title: "Reliability & safety (where Pi Durable earns its keep)", items: [
+    { id: "D1", out: "crash recovery importance", type: "radio", label: "How important is crash recovery?", options: [
+      ["nice", "Nice to have — losing an in-flight task occasionally is OK"],
+      ["important", "Important — long tasks must not be lost when the box reboots"],
+      ["critical", "Critical — it drives real work (deploys, payments, external side effects); exactly-once matters"],
+    ] },
+
+    { id: "D2", out: "risk tolerance", type: "radio", label: "Risk tolerance for tool actions", options: [
+      ["ro", "Read-only / analysis only"],
+      ["local", "Local writes OK (files, repos on my machines)"],
+      ["gated", "External side effects allowed with human approval gates (hooks + memos)"],
+      ["auto", "External side effects fully autonomous within budgets"],
+    ] },
+
+    { id: "D3", out: "cost control", type: "radio", label: "Cost control", options: [
+      ["none", "None — run it as long as needed"],
+      ["task", "Per-task budget caps"],
+      ["daily", "Daily/weekly caps with alerts"],
+      ["escalate", "Cheapest model by default; escalate to strong models for hard steps"],
+    ] },
+
+    { id: "D4", out: "models", type: "text", label: "Models to use", placeholder: "e.g. \u201cClaude + GPT via API\u201d / \u201clocal Ollama where possible\u201d / \u201cmix: cheap model for subagents, strong model for the main agent\u201d" },
+  ]},
+
+  { section: "E", title: "Free-form wrap-up", items: [
+    { id: "E1", out: "hero use case", type: "text", label: "The one thing you most want this agent to do that no current tool does well", placeholder: "…" },
+    { id: "E2", out: "hard constraints", type: "text", label: "Hard constraints (hardware, network, compliance, data location)", placeholder: "…" },
+    { id: "E3", out: "MVP in 2 weeks", type: "text", label: "MVP scope — what would make this \u201cworking\u201d for you in 2 weeks?", placeholder: "…" },
+    { id: "E4", out: "missed / other use case", type: "text", label: "Anything I've missed / a use case you had in mind", placeholder: "…" },
+  ]},
+];
+
+// ---------- State ----------
+const LS_KEY = "pi-durable-brainstorm-v1";
+let state = {};
+
+function loadState() {
+  try {
+    if (location.hash.startsWith("#s=")) {
+      const json = decodeURIComponent(atob(location.hash.slice(3)));
+      state = JSON.parse(json);
+      return;
+    }
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) state = JSON.parse(saved);
+  } catch (e) { /* ignore bad state */ }
+}
+function saveState() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+// ---------- Rendering ----------
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else n.setAttribute(k, v);
+  }
+  children.forEach(c => n.appendChild(c));
+  return n;
+}
+
+function render() {
+  const root = document.getElementById("questions");
+  for (const sec of QUESTIONS) {
+    const card = el("section", { class: "card" });
+    card.append(el("h2", { text: `${sec.section}. ${sec.title}` }));
+    for (const q of sec.items) card.appendChild(renderQuestion(q));
+    root.appendChild(card);
+  }
+}
+
+function renderQuestion(q) {
+  const box = el("div", { class: "q" });
+  const label = el("div", { class: "qlabel" }, el("span", { class: "qid", text: q.id }), document.createTextNode(q.label));
+  box.appendChild(label);
+  if (q.hint) box.appendChild(el("div", { class: "hint", text: q.hint }));
+
+  if (q.type === "text") {
+    const ta = el("textarea", { id: "in_" + q.id, placeholder: q.placeholder || "" });
+    ta.value = state[q.id] || "";
+    ta.addEventListener("input", () => { state[q.id] = ta.value.trim(); saveState(); updateProgress(); });
+    box.appendChild(ta);
+  } else {
+    const list = el("div");
+    for (const [key, labelTxt, desc] of q.options) {
+      const inputId = `in_${q.id}_${key}`;
+      const lab = el("label", { class: "opt" });
+      const inp = el("input", { type: q.type === "radio" ? "radio" : "checkbox", name: q.id, value: key, id: inputId });
+      if ((q.type === "radio" && state[q.id] === key) || (q.type === "check" && (state[q.id] || []).includes(key))) inp.checked = true;
+      const txt = desc ? el("span", {}, el("span", { text: labelTxt }), el("span", { class: "desc", text: desc })) : el("span", { text: labelTxt });
+      lab.append(inp, txt);
+      inp.addEventListener("change", () => {
+        if (q.type === "radio") state[q.id] = key;
+        else {
+          const arr = new Set(state[q.id] || []);
+          inp.checked ? arr.add(key) : arr.delete(key);
+          state[q.id] = [...arr];
+        }
+        saveState(); updateProgress(); syncConditionals();
+      });
+      list.appendChild(lab);
+    }
+    box.appendChild(list);
+
+    if (q.other) {
+      const wrap = el("div", { class: "extra" });
+      wrap.dataset.whenQ = q.id; wrap.dataset.whenV = "other";
+      const t = el("input", { type: "text", id: "in_" + q.other.key, placeholder: q.other.placeholder || "" });
+      t.value = state[q.other.key] || "";
+      t.addEventListener("input", () => { state[q.other.key] = t.value.trim(); saveState(); updateProgress(); });
+      wrap.appendChild(t);
+      box.appendChild(wrap);
+    }
+    for (const ex of q.extras || []) {
+      const wrap = el("div", { class: "extra" });
+      if (ex.when) { wrap.dataset.whenQ = ex.when.q; wrap.dataset.whenV = ex.when.value; }
+      const lab = el("label", { text: ex.label });
+      const t = el("input", { type: "text", id: "in_" + ex.key, placeholder: ex.placeholder || "" });
+      t.value = state[ex.key] || "";
+      t.addEventListener("input", () => { state[ex.key] = t.value.trim(); saveState(); updateProgress(); });
+      wrap.append(lab, t);
+      box.appendChild(wrap);
+    }
+  }
+  return box;
+}
+
+function syncConditionals() {
+  document.querySelectorAll("[data-whenQ]").forEach(w => {
+    const show = state[w.dataset.whenQ] === w.dataset.whenV;
+    w.style.display = show ? "" : "none";
+  });
+}
+
+function isAnswered(q) {
+  if (q.type === "text") return !!(state[q.id] && state[q.id].trim());
+  if (q.type === "radio") return !!state[q.id];
+  return !!(state[q.id] && state[q.id].length);
+}
+
+function updateProgress() {
+  const all = QUESTIONS.flatMap(s => s.items);
+  const done = all.filter(isAnswered).length;
+  document.getElementById("count").textContent = `${done} / ${all.length} answered`;
+  document.getElementById("barFill").style.width = (100 * done / all.length) + "%";
+  syncConditionals();
+}
+
+// ---------- Output generation ----------
+function optionLabel(q, key) {
+  const found = q.options.find(o => o[0] === key);
+  return found ? found[1] : key;
+}
+
+function answerText(q) {
+  if (q.type === "text") {
+    return state[q.id] ? state[q.id].trim() : "—";
+  }
+  if (q.type === "radio") {
+    if (!state[q.id]) return "—";
+    let t = optionLabel(q, state[q.id]);
+    if (state[q.id] === "other" && q.other && state[q.other.key]) t += ` — ${state[q.other.key].trim()}`;
+    return t;
+  }
+  // check
+  const sel = state[q.id] || [];
+  let parts = sel.length ? sel.map(k => optionLabel(q, k)) : [];
+  for (const ex of q.extras || []) {
+    if (state[ex.key] && state[ex.key].trim()) parts.push(`${ex.label}: ${state[ex.key].trim()}`);
+  }
+  return parts.length ? parts.join("; ") : "—";
+}
+
+function generate() {
+  const lines = [];
+  lines.push("# Pi Durable Brainstorm — Responses");
+  lines.push(`Date: ${new Date().toISOString()}`);
+  for (const sec of QUESTIONS) {
+    lines.push("");
+    lines.push(`## ${sec.section}. ${sec.title}`);
+    for (const q of sec.items) {
+      lines.push(`${q.id} ${q.out}: ${answerText(q)}`);
+    }
+  }
+  document.getElementById("outputBox").value = lines.join("\n");
+  const panel = document.getElementById("outputPanel");
+  panel.style.display = "block";
+  panel.scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------- Actions ----------
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+async function copyOutput() {
+  try { await navigator.clipboard.writeText(document.getElementById("outputBox").value); toast("Copied to clipboard"); }
+  catch (e) { document.getElementById("outputBox").select(); toast("Selected — press Ctrl/Cmd+C"); }
+}
+
+function downloadMd() {
+  const blob = new Blob([document.getElementById("outputBox").value], { type: "text/markdown" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: "brainstorm-responses.md" });
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function copyShareLink() {
+  try {
+    const enc = btoa(unescape(encodeURIComponent(JSON.stringify(state))));
+    const url = location.origin + location.pathname + "#s=" + enc;
+    navigator.clipboard.writeText(url).then(() => toast("Share link copied"));
+  } catch (e) { toast("Could not copy link"); }
+}
+
+function resetAll() {
+  if (!confirm("Clear all answers?")) return;
+  state = {}; saveState(); location.hash = ""; location.reload();
+}
+
+// ---------- Init ----------
+loadState();
+render();
+updateProgress();
+</script>
+
+</body>
+</html>

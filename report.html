@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pi Durable — Investigation Report</title>
+<style>
+  :root {
+    --bg: #fafbfc;
+    --panel: #ffffff;
+    --ink: #1a202c;
+    --ink-soft: #4a5568;
+    --ink-faint: #8a94a6;
+    --accent: #2f6feb;
+    --accent-soft: #eaf1fd;
+    --green: #1f8a4c;
+    --green-soft: #e7f5ec;
+    --amber: #b45309;
+    --amber-soft: #fdf1e0;
+    --red: #b91c1c;
+    --red-soft: #fdecec;
+    --code-bg: #0f172a;
+    --code-ink: #e2e8f0;
+    --border: #e2e8f0;
+    --mono: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6; font-size: 15.5px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* Header */
+  header.hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+    color: #fff; padding: 56px 24px 48px; margin-bottom: 40px;
+  }
+  .hero-inner { max-width: 980px; margin: 0 auto; }
+  .hero h1 { font-size: 34px; margin: 0 0 10px; letter-spacing: -0.5px; }
+  .hero p.sub { font-size: 17px; color: #c7d2fe; margin: 0 0 20px; max-width: 720px; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); color: #e0e7ff;
+  }
+  .badge.warn { background: rgba(251,191,36,.18); border-color: rgba(251,191,36,.5); color: #fde68a; }
+  .hero .meta { margin-top: 18px; font-size: 13px; color: #a5b4fc; }
+
+  /* TOC */
+  nav.toc {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 22px; margin-bottom: 40px;
+  }
+  nav.toc h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--ink-faint); margin: 0 0 10px; }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  nav.toc li { margin: 4px 0; font-size: 14px; }
+  nav.toc a { color: var(--accent); text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+
+  /* Sections */
+  section { margin-bottom: 56px; }
+  h2.sec {
+    font-size: 24px; letter-spacing: -0.3px; margin: 0 0 16px;
+    padding-bottom: 10px; border-bottom: 2px solid var(--border);
+  }
+  h2.sec .num { color: var(--accent); font-weight: 700; margin-right: 8px; }
+  h3 { font-size: 18px; margin: 28px 0 10px; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 24px; }
+  li { margin: 5px 0; }
+  strong { color: var(--ink); }
+  a { color: var(--accent); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 22px; margin: 16px 0;
+  }
+  .callout { border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; padding: 12px 18px; margin: 16px 0; }
+  .callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+  .callout.danger { border-left-color: var(--red); background: var(--red-soft); }
+  .callout.good { border-left-color: var(--green); background: var(--green-soft); }
+  .callout p:first-child { margin-top: 0; } .callout p:last-child { margin-bottom: 0; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; background: var(--panel); }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfd; }
+
+  /* Code */
+  pre {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-family: var(--mono);
+    font-size: 13px; line-height: 1.55; margin: 14px 0;
+  }
+  code.inline {
+    font-family: var(--mono); font-size: 0.88em; background: #eef2f7;
+    padding: 1.5px 6px; border-radius: 5px; color: #0f2a5c;
+  }
+  pre .cm { color: #7c93b3; font-style: italic; }
+  pre .kw { color: #93c5fd; }
+  pre .str { color: #86efac; }
+  pre .fn { color: #fbbf24; }
+
+  .figcap { font-size: 13px; color: var(--ink-faint); text-align: center; margin-top: 6px; }
+
+  /* Feature grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin: 16px 0; }
+  .fcard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .fcard h4 { margin: 0 0 6px; font-size: 15px; color: var(--accent); }
+  .fcard p { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
+
+  .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .pill { font-family: var(--mono); font-size: 12px; background: #eef2f7; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; color: #334155; }
+
+  footer { border-top: 1px solid var(--border); margin-top: 64px; padding-top: 20px; font-size: 13px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <h1>Pi Durable — Investigation Report</h1>
+    <p class="sub">What it is, what it can do, how to run it on Kubernetes, and how to give it tasks from the outside.</p>
+    <div class="badges">
+      <span class="badge warn">Experimental — API changes without notice</span>
+      <span class="badge">@earendil-works/pi-durable</span>
+      <span class="badge">Shipped with Pi 1.0 · Oct 2026</span>
+      <span class="badge">TypeScript · any JS runtime</span>
+    </div>
+    <div class="meta">Investigated from primary sources: Earendil announcement, npm package docs, Vercel / Cloudflare / Temporal integration guides, sigs.k8s.io agent-sandbox example.</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc" id="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#summary">Executive summary</a></li>
+    <li><a href="#what">What Pi Durable is</a></li>
+    <li><a href="#concepts">Core concepts</a></li>
+    <li><a href="#features">Features in depth</a></li>
+    <li><a href="#examples">Code examples</a></li>
+    <li><a href="#k8s">Kubernetes deployment</a></li>
+    <li><a href="#comms">Communication &amp; task submission</a></li>
+    <li><a href="#ecosystem">Related packages &amp; alternatives</a></li>
+    <li><a href="#comparison">Comparison: Hermes Agent &amp; Agent Zero</a></li>
+    <li><a href="#risks">Risks &amp; open questions</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</nav>
+
+<!-- ============================== 1 ============================== -->
+<section id="summary">
+  <h2 class="sec"><span class="num">1</span>Executive summary</h2>
+  <div class="card">
+    <p><strong>Pi Durable</strong> is an experimental <em>durable agent harness</em> from Earendil (makers of the Pi coding agent). It is a framework for building agentic applications — coding agents included — that run anywhere there is a JavaScript runtime, support infinitely long conversations, survive crashes and redeploys, and let multiple humans steer the same agents.</p>
+    <p>Everything the harness does — model calls, tool calls, compaction, and your own application state machines — is a <strong>durable task</strong> that checkpoints before advancing. All changes flow through atomic commits to a storage backend (memory, SQLite, JSONL, or your own). If the process dies, a new process opens the same storage and continues from the last checkpoint.</p>
+  </div>
+  <div class="grid">
+    <div class="fcard"><h4>Kubernetes fit</h4><p>One Pod = one harness over one storage (built-in backends are single-owner). SQLite on a PVC survives restarts; <code class="inline">harness.resume()</code> picks up interrupted work. Scale out by running multiple agents, or implement a Postgres backend for true HA.</p></div>
+    <div class="fcard"><h4>Giving it tasks</h4><p>Wrap <code class="inline">root.submit({content, requestId})</code> in an HTTP endpoint. The <code class="inline">requestId</code> makes submissions exactly-once — CI jobs, webhooks and bots can retry safely. Stream progress with <code class="inline">watchEvents()</code> over SSE/WebSocket.</p></div>
+    <div class="fcard"><h4>Main caveats</h4><p>Experimental API (pin versions). No built-in multi-process locking/HA. Hard power loss can lose the last un-fsynced SQLite commit. Built-in tools get real filesystem/shell access — isolate per conversation.</p></div>
+  </div>
+</section>
+
+<!-- ============================== 2 ============================== -->
+<section id="what">
+  <h2 class="sec"><span class="num">2</span>What Pi Durable is</h2>
+  <p>Pi the coding agent runs on your machine, inside a terminal, driven by one person — if it dies, you look at what happened and tell it to continue. Pi Durable exists because Earendil wants agents that <em>run anywhere, can be reached from different surfaces, support infinitely long conversations, survive catastrophic failures, and let multiple humans steer the same agent</em>.</p>
+  <ul>
+    <li><strong>Not a replacement for the pi coding agent.</strong> It's a framework; the coding agent is one possible application built on it. They share code (<code class="inline">pi-ai</code>) and principles: minimalism and malleability.</li>
+    <li><strong>~15,000 lines of source</strong> (~150k tokens with GPT, ~250k with Claude) — deliberately small enough for an agent to read and build on. Storage backends alone are ~3,000 lines you can usually skip.</li>
+    <li><strong>Built on</strong> <code class="inline">@earendil-works/pi-ai</code> (model access) and <code class="inline">@earendil-works/chord</code> (document state / contexts).</li>
+  </ul>
+  <pre><span class="cm"># install</span>
+npm install @earendil-works/pi-durable @earendil-works/pi-ai @earendil-works/chord</pre>
+  <div class="callout warn"><p><strong>Status:</strong> experimental. The API changes without notice between releases. Pin exact versions in production.</p></div>
+</section>
+
+<!-- ============================== 3 ============================== -->
+<section id="concepts">
+  <h2 class="sec"><span class="num">3</span>Core concepts</h2>
+  <table>
+    <tr><th style="width:180px">Concept</th><th>Meaning</th></tr>
+    <tr><td><strong>Harness</strong></td><td>One open storage plus the machinery that runs agents on it. All changes go through one line of atomic commits; nothing is shown before its commit is stored.</td></tr>
+    <tr><td><strong>Conversation</strong></td><td>A transcript — an immutable, ordered list of entries. <code class="inline">root()</code> creates the root conversation on first use (same one after every restart). You can create more conversations and fork them at any point.</td></tr>
+    <tr><td><strong>Entry</strong></td><td>One immutable transcript record: user message, model response, tool result, system prompt change, reset — or your own kinds. The model sees entries from the newest reset onward.</td></tr>
+    <tr><td><strong>Commit</strong></td><td>An atomic write. A commit can append entries, edit documents, and create tasks together — all or nothing.</td></tr>
+    <tr><td><strong>Document</strong></td><td>Typed JSON state stored next to the transcript and changed in commits. Built-ins hold agent config (<code class="inline">pi.agent</code>), live run state (<code class="inline">pi.live</code>), queued messages (<code class="inline">pi.inbox</code>), spend (<code class="inline">pi.usage</code>).</td></tr>
+    <tr><td><strong>Task</strong></td><td>A durable state machine that saves a checkpoint at every step, so a restarted process continues from the last one. Every task has an owner (a conversation or another task). Built-ins: <code class="inline">pi.generation</code> (model call), <code class="inline">pi.tool</code>, compaction.</td></tr>
+    <tr><td><strong>Submission</strong></td><td>Something you hand to a conversation — user input or an entry to write — which you can wait for. Carries an optional <code class="inline">requestId</code> for exactly-once semantics.</td></tr>
+    <tr><td><strong>Turn / Run</strong></td><td>A turn = one model response and its tool calls. A run = the turns from an input to its final answer. A conversation is busy while a run is going.</td></tr>
+    <tr><td><strong>Extension</strong></td><td>A named bundle of tools, system prompt sections, hooks, wrappers, and tasks. Installed in a registry; conversations select extensions by name.</td></tr>
+    <tr><td><strong>Registry</strong></td><td>The extensions this process installed. It can change while the harness runs — new work uses the new state.</td></tr>
+    <tr><td><strong>Agent</strong></td><td>What a conversation runs with: model, thinking level, selected extensions/tools, instructions, working directory. Stored per conversation as names in <code class="inline">pi.agent</code>.</td></tr>
+  </table>
+
+  <h3>One answered input, as entries and tasks</h3>
+  <pre>submit(input) → pi.user
+  pi.generation → pi.system (only if the prompt or tools changed), pi.assistant (tool calls)
+    pi.tool × n → pi.tool-result × n   <span class="cm">(owned by the generation, which waits for them)</span>
+  pi.generation → pi.assistant (answer) → submission done</pre>
+
+  <h3>Ownership tree</h3>
+  <p>Tasks and conversations form one ownership tree. Aborting a task aborts what it owns, bottom-up — every task cleans up its own effects first. A subagent is the same pattern: a conversation owned by the tool call that started it.</p>
+</section>
+
+<!-- ============================== 4 ============================== -->
+<section id="features">
+  <h2 class="sec"><span class="num">4</span>Features in depth</h2>
+
+  <h3>4.1 Durability — survives crashes</h3>
+  <ul>
+    <li>Every step of a run is a task that stores a checkpoint before it moves on. If the process dies (laptop sleep, container redeploy, OOM), a new process opens the same storage, finds the unfinished tasks, and continues each from its last checkpoint: <code class="inline">harness.resume()</code>.</li>
+    <li>A model request cut off mid-stream is sent again; the partial answer stays in the transcript, marked as aborted.</li>
+    <li>A tool call cut off mid-run reruns <strong>only if it declared <code class="inline">replay: "safe"</code></strong>; otherwise the model is told the call was interrupted, with the output stored so far, and decides what to do.</li>
+    <li><strong>Exactly-once submissions:</strong> a <code class="inline">requestId</code> makes a submission idempotent — a client that retries after a crash gets the original submission back instead of asking twice. <code class="inline">harness.submission(id)</code> re-acquires a submission by ID after a restart.</li>
+    <li>Queued messages stay queued across restarts. Subagents continue from where they left off; a replay-safe subagent tool finds its subagent again and waits for its answer.</li>
+  </ul>
+
+  <h3>4.2 Long runs, anywhere</h3>
+  <ul>
+    <li><strong>Storage backends:</strong> memory, SQLite (Node), JSONL — plus a conformance suite and benchmarks for your own backend. The SQLite/JSONL code uses no Node APIs, so with a small adapter it runs on Bun or inside a Cloudflare Durable Object.</li>
+    <li><strong>Custom backends are cheap:</strong> the storage interface is small; easy to implement over Postgres or a key-value store.</li>
+    <li><strong>Single-owner rule:</strong> one process owns a storage at a time; other clients attach to that process. No cross-process locking in built-in backends (a key design constraint for k8s — see §6).</li>
+    <li><strong>Bounded memory:</strong> the harness keeps only the working set in memory — active transcripts (naturally bounded by the model's context window via compaction), live tasks, pending submissions. Everything else stays on disk until needed.</li>
+    <li><strong>Execution environments are pluggable too:</strong> a Node env gives tools local files/shell; a custom env can expose remote execution, so the harness runs on one machine while its tools run on another. The <code class="inline">env</code> function builds the environment per tool call from the conversation's working directory.</li>
+  </ul>
+
+  <h3>4.3 Infinitely long conversations</h3>
+  <ul>
+    <li><strong>Compaction is a durable background task:</strong> when context nears the model limit, older messages are summarized in the background and placed at the next turn boundary. The conversation only waits for a summary if the next request wouldn't fit otherwise; if the provider still rejects as too long, the harness compacts and retries once.</li>
+    <li>Older messages always stay in storage — searchable even after compaction or handoff.</li>
+    <li><strong>Reset / handoff:</strong> starts a new context, optionally from a handoff note. A tool can request it by returning <code class="inline">control: { handoff }</code>. Nothing is deleted, so later tools can still search everything before the handoff.</li>
+    <li>Tunable via settings: <code class="inline">reserveTokens</code> (wait-for-summary threshold) and <code class="inline">backgroundTokens</code> (start background summary this far early).</li>
+  </ul>
+
+  <h3>4.4 Many conversations at once</h3>
+  <ul>
+    <li>One harness runs as many conversations as you need, concurrently — none blocks another.</li>
+    <li><strong>Forks:</strong> a conversation can fork another at any point in its transcript and sees the parent's history up to that point without copying it. Think Slack channel = conversation, thread = fork of the message it replies to.</li>
+    <li><strong>Per-conversation agent config:</strong> model, thinking level, selected extensions/tools, extra instructions, working directory. A reviewer next to the main agent can use a cheaper model, read-only tools, and its own checkout.</li>
+    <li>Forks start with the agent their parent had at the fork entry; task-owned conversations (subagents) start as copies of their owner's agent.</li>
+  </ul>
+
+  <h3>4.5 Extensions — pluggable everything, malleable while running</h3>
+  <ul>
+    <li>An extension is a named bundle of <strong>sections, tools, hooks, wraps (decorators), and tasks</strong>. The application installs extensions in a registry; each conversation selects which it uses and stores only their names.</li>
+    <li><strong>System prompt</strong> is rebuilt from sections before every request; only what changed is re-sent (provider prompt caches stay warm); changes are recorded positionally in the transcript so restarts and forks see exactly what the model saw.</li>
+    <li><strong>Malleable:</strong> installing an extension under an already-installed name replaces it in one step. A tool call already running finishes on the code it started with; the next call uses the new code. After a restart, conversations pick up whatever the new process installs.</li>
+    <li>A later extension's tool with the same name replaces the earlier one (e.g., a bash that runs inside a Python venv); <code class="inline">wrapTool()</code> decorates whichever tool won (e.g., timing every bash call).</li>
+  </ul>
+
+  <h3>4.6 Tools</h3>
+  <ul>
+    <li><strong>Built-in CodingTools:</strong> <code class="inline">read</code>, <code class="inline">write</code>, <code class="inline">edit</code>, <code class="inline">bash</code>. Files and processes are only touched through the call's execution environment. Image support via an optional Photon WASM processor (worker-threaded on Node).</li>
+    <li><strong>Custom tools</strong> via <code class="inline">defineTool()</code> with TypeBox schemas; args validated before <code class="inline">execute()</code>. Three result channels: <code class="inline">output</code> (for the model), <code class="inline">structuredOutput</code> (for programs calling the tool, schema-validated), <code class="inline">details</code> (for UIs).</li>
+    <li><code class="inline">api.output()</code> streams running output to every client watching.</li>
+    <li><strong>Replay policy:</strong> each call runs as its own durable task; intent is committed before it runs. After a crash, rerun only if <code class="inline">replay: "safe"</code>; otherwise the model gets an <code class="inline">interrupted</code> error result with partial output.</li>
+    <li><strong>Calling tools from tools:</strong> <code class="inline">api.executeTool()</code> — nested calls are their own tool tasks with their own replay policy, owned by the caller. Keys make retry-after-crash idempotent (finished calls are returned, not restarted).</li>
+    <li><strong>Access control:</strong> <code class="inline">callers: ["model" | "tools"]</code> restricts who may call a tool; <code class="inline">modelTools</code> narrows what the model is offered without taking tools away from other tools. <code class="inline">deferred: true</code> + a tool-search extension handles large tool sets (e.g., an MCP server's).</li>
+    <li><strong>Code Mode:</strong> a <code class="inline">codemode</code> tool where the model writes JavaScript that calls the conversation's tools in a QuickJS sandbox. Scripts survive restarts: deterministic replay (virtual clock, seeded randomness) plus journaled results — finished calls are not run again.</li>
+  </ul>
+
+  <h3>4.7 Hooks</h3>
+  <ul>
+    <li>Hooks step into tasks — built-in ones (model response, tool call, compaction) and your own: rewrite a request before it goes to the model, block or rewrite a tool call, replace a result, keep a run going, write a summary yourself.</li>
+    <li>Several extensions can hook the same point; hooks run as a chain in selection order. A throw is reported and the chain continues (except <code class="inline">beforeTool</code>, where a throw blocks).</li>
+    <li><strong>Memos:</strong> a hook that makes a decision stores it with the task — after a crash, the memo is found instead of re-deciding. This is how you build "ask Slack for approval exactly once" gates.</li>
+  </ul>
+
+  <h3>4.8 Custom durable tasks</h3>
+  <ul>
+    <li><code class="inline">defineTask()</code> defines named state machines with phases, checkpoints, timers that survive restarts, and waiting on other tasks (<code class="inline">on: [taskIds]</code>, policy <code class="inline">failFast</code>).</li>
+    <li>Tasks get the same machinery as built-ins. Ownership ties them to conversations or parent tasks; aborting propagates bottom-up with per-task <strong>abort handlers that clean up effects</strong> (e.g., refund payments when a sibling card is declined).</li>
+    <li><strong>Foreground vs background:</strong> foreground tasks are part of the current work (an Esc aborts them); background tasks belong to the conversation but not its current turn — they outlive it (a subagent that should outlive the turn, a reminder that fires tomorrow).</li>
+  </ul>
+
+  <h3>4.9 Documents — durable application state</h3>
+  <ul>
+    <li>Typed JSON stored next to the transcript and changed in the same atomic commits — app state (todo lists, plans, tickets, sandbox assignments) can never disagree with the transcript that produced it.</li>
+    <li>Each document declares fork semantics: parent's value at the fork point (<code class="inline">asOf</code>), current value, or fresh.</li>
+    <li>UIs subscribe to committed values; sections can render documents into the system prompt (the model sees live state before every request).</li>
+  </ul>
+
+  <h3>4.10 Multiplayer &amp; remote clients</h3>
+  <ul>
+    <li>Everything a UI needs is committed state → <strong>any number of clients can attach to any conversation</strong>: watch, join late, reconnect from the current view, steer.</li>
+    <li><code class="inline">viewState()</code> + <code class="inline">subscribe()</code>: full current view first (transcript, streaming answer, running tools and output, queued messages, agent, usage), then only deltas.</li>
+    <li><strong><code class="inline">watch()</code></strong> delivers the exact operations of every commit — small enough to send over a socket. <strong><code class="inline">watchEvents()</code></strong> maps commits into the pi coding agent's familiar events (more bytes on the wire).</li>
+    <li>Steering: <code class="inline">submit({ content, whenBusy: "steer" })</code> reaches the model at its next model call; a plain submit queues behind the current work.</li>
+  </ul>
+
+  <h3>4.11 Subagents &amp; usage</h3>
+  <ul>
+    <li>No built-in subagents, but they're a few lines: a tool creates an owned conversation (own model/instructions/tools), submits work, waits for the answer. The subagent is a durable conversation — survives crashes, counts its own cost, and a UI can show it under the call.</li>
+    <li>Per-conversation usage/cost tracking; tools can report <code class="inline">usage</code>; spend lives in the <code class="inline">pi.usage</code> document.</li>
+  </ul>
+</section>
+
+<!-- ============================== 5 ============================== -->
+<section id="examples">
+  <h2 class="sec"><span class="num">5</span>Code examples</h2>
+
+  <h3>5.1 Minimal harness (SQLite, coding tools)</h3>
+  <pre><span class="kw">import</span> { BACKGROUND_CONTEXT } <span class="kw">from</span> <span class="str">"@earendil-works/chord/context"</span>;
+<span class="kw">import</span> { createModels } <span class="kw">from</span> <span class="str">"@earendil-works/pi-ai/models"</span>;
+<span class="kw">import</span> { openaiProvider } <span class="kw">from</span> <span class="str">"@earendil-works/pi-ai/providers/openai"</span>;
+<span class="kw">import</span> { createRegistry, Harness, CodingTools } <span class="kw">from</span> <span class="str">"@earendil-works/pi-durable"</span>;
+<span class="kw">import</span> { NodeExecutionEnv } <span class="kw">from</span> <span class="str">"@earendil-works/pi-durable/env/node"</span>;
+<span class="kw">import</span> { openNodeSqliteStorage } <span class="kw">from</span> <span class="str">"@earendil-works/pi-durable/storage/sqlite/node"</span>;
+
+<span class="kw">const</span> context = BACKGROUND_CONTEXT; <span class="cm">// every call takes a context for cancellation</span>
+<span class="kw">const</span> models = <span class="fn">createModels</span>();
+models.<span class="fn">setProvider</span>(<span class="fn">openaiProvider</span>()); <span class="cm">// reads OPENAI_API_KEY</span>
+
+<span class="kw">const</span> registry = <span class="fn">createRegistry</span>();
+registry.<span class="fn">install</span>(CodingTools); <span class="cm">// read, write, edit, bash</span>
+
+<span class="kw">const</span> harness = <span class="kw">await</span> Harness.<span class="fn">open</span>(
+  <span class="kw">await</span> <span class="fn">openNodeSqliteStorage</span>(<span class="str">"/data/agent.sqlite"</span>),
+  { models, registry, env: ({ cwd }) =>&gt; <span class="kw">new</span> NodeExecutionEnv({ cwd: cwd ?? <span class="str">"/work"</span>) } },
+  context,
+);
+harness.<span class="fn">resume</span>(); <span class="cm">// continue any run a previous process left unfinished</span>
+
+<span class="kw">const</span> root = <span class="kw">await</span> harness.<span class="fn">root</span>(context, {
+  agent: { model: { provider: <span class="str">"openai"</span>, modelId: <span class="str">"gpt-6.1-sol"</span> }, cwd: <span class="str">"/work/repo"</span> },
+});
+
+<span class="kw">const</span> job = { type: <span class="str">"input"</span>, content: <span class="str">"Fix the flaky login test"</span>, requestId: <span class="str">"job-42"</span> } <span class="kw">as const</span>;
+<span class="kw">await</span> root.<span class="fn">submit</span>(job, context);
+<span class="cm">// the process dies here, in the middle of a tool call…</span>
+
+<span class="cm">// …a new process opens the same storage:</span>
+<span class="kw">const</span> harness2 = <span class="kw">await</span> Harness.<span class="fn">open</span>(<span class="kw">await</span> <span class="fn">openNodeSqliteStorage</span>(<span class="str">"/data/agent.sqlite"</span>), { models, registry }, context);
+harness2.<span class="fn">resume</span>();
+<span class="kw">const</span> root2 = <span class="kw">await</span> harness2.<span class="fn">root</span>(context);
+<span class="cm">// same submission, answered — no duplicate run:</span>
+<span class="kw">const</span> settled = <span class="kw">await</span> (<span class="kw">await</span> root2.<span class="fn">submit</span>(job, context)).<span class="fn">wait</span>(context);</pre>
+
+  <h3>5.2 Channels and threads (forks)</h3>
+  <pre><span class="kw">const</span> channel = <span class="kw">await</span> harness.<span class="fn">root</span>(context);
+<span class="kw">const</span> question = <span class="kw">await</span> channel.<span class="fn">submit</span>(
+  { type: <span class="str">"input"</span>, content: <span class="str">"@agent why did the deploy fail?"</span> }, context);
+<span class="kw">const</span> answered = <span class="kw">await</span> question.<span class="fn">wait</span>(context);
+
+<span class="cm">// A thread forks at the message it replies to. Ownerless: no one's abort reaches it.</span>
+<span class="kw">const</span> thread = <span class="kw">await</span> channel.<span class="fn">fork</span>(answered.answer!, { ownership: { kind: <span class="str">"ownerless"</span> } }, context);
+
+<span class="cm">// Both conversations work at the same time, neither blocks the other.</span>
+<span class="kw">const</span> inThread  = <span class="kw">await</span> thread.<span class="fn">submit</span>({ type: <span class="str">"input"</span>, content: <span class="str">"@agent can we roll it back?"</span> }, context);
+<span class="kw">const</span> inChannel = <span class="kw">await</span> channel.<span class="fn">submit</span>({ type: <span class="str">"input"</span>, content: <span class="str">"@agent who is on call today?"</span> }, context);
+<span class="kw">await</span> Promise.<span class="fn">all</span>([inThread.<span class="fn">wait</span>(context), inChannel.<span class="fn">wait</span>(context)]);
+
+<span class="cm">// The thread may search, but not deploy:</span>
+<span class="kw">await</span> thread.<span class="fn">configure</span>({ tools: { remove: [<span class="str">"deploy"</span>] } }, context);</pre>
+
+  <h3>5.3 Custom tool with replay policy + streaming output</h3>
+  <pre><span class="kw">import</span> { Type } <span class="kw">from</span> <span class="str">"@earendil-works/pi-ai"</span>;
+<span class="kw">import</span> { defineTool, defineExtension } <span class="kw">from</span> <span class="str">"@earendil-works/pi-durable"</span>;
+
+<span class="kw">const</span> searchIssues = <span class="fn">defineTool</span>({
+  name: <span class="str">"search_issues"</span>,
+  description: <span class="str">"Search the issue tracker"</span>,
+  parameters: Type.<span class="fn">Object</span>({ query: Type.<span class="fn">String</span>() }),
+  replay: <span class="str">"safe"</span>, <span class="cm">// only reads — a rerun after a crash is fine</span>
+  execute: <span class="kw">async</span> (args, api) =&gt; {
+    api.<span class="fn">output</span>(<span class="str">`searching for ${args.query}\n`</span>); <span class="cm">// streamed to every watcher</span>
+    <span class="kw">return</span> { content: [{ type: <span class="str">"text"</span>, text: <span class="kw">await</span> tracker.<span class="fn">search</span>(args.query) }] };
+  },
+});
+
+<span class="kw">const</span> deploy = <span class="fn">defineTool</span>({
+  name: <span class="str">"deploy"</span>,
+  description: <span class="str">"Deploy a version to production"</span>,
+  parameters: Type.<span class="fn">Object</span>({ version: Type.<span class="fn">String</span>() }),
+  <span class="cm">// no replay: an interrupted deploy is reported to the model, never repeated</span>
+  execute: <span class="kw">async</span> (args) =&gt; ({ content: [{ type: <span class="str">"text"</span>, text: <span class="kw">await</span> ci.<span class="fn">deploy</span>(args.version) }] }),
+});
+
+registry.<span class="fn">install</span>(<span class="fn">defineExtension</span>({ name: <span class="str">"ops"</span>, tools: [searchIssues, deploy] }));</pre>
+
+  <h3>5.4 Hook with a memo — approve once, survive restarts</h3>
+  <pre><span class="kw">import</span> { defineExtension, hook, ToolTask } <span class="kw">from</span> <span class="str">"@earendil-works/pi-durable"</span>;
+
+<span class="kw">const</span> Approval = <span class="fn">defineExtension</span>({
+  name: <span class="str">"approval"</span>,
+  hooks: [
+    <span class="fn">hook</span>(ToolTask, {
+      <span class="fn">beforeTool</span>: <span class="kw">async</span> (call, api, context) =&gt; {
+        <span class="kw">if</span> (call.name !== <span class="str">"deploy"</span>) <span class="kw">return undefined</span>;
+        <span class="cm">// After a restart, the hook finds the stored answer instead of asking again.</span>
+        <span class="kw">let</span> approved = <span class="kw">await</span> api.<span class="fn">memo</span>(<span class="str">"approval:deploy"</span>, context);
+        approved ??= <span class="kw">await</span> api.<span class="fn">memo</span>(<span class="str">"approval:deploy"</span>, <span class="kw">await</span> <span class="fn">askInSlack</span>(call), context);
+        <span class="kw">return</span> approved ? <span class="kw">undefined</span> : { block: <span class="str">"Nobody approved the deploy."</span> };
+      },
+    }),
+  ],
+});</pre>
+
+  <h3>5.5 Custom durable task with cleanup (payments)</h3>
+  <pre><span class="kw">const</span> Payment = <span class="fn">defineTask</span>({
+  name: <span class="str">"shop.payment"</span>, version: 1,
+  initial: () =&gt; ({ phase: <span class="str">"charge"</span> }),
+  phases: {
+    charge: <span class="kw">async</span> (task, runtime, context) =&gt; {
+      <span class="cm">// idempotency key: a crash rerun charges the card only once</span>
+      <span class="kw">const</span> charge = <span class="kw">await</span> bank.<span class="fn">charge</span>(task.input.card, <span class="str">`payment-${task.id}`</span>);
+      <span class="kw">await</span> runtime.<span class="fn">commit</span>(() =&gt; ({
+        status: <span class="str">"terminal"</span>,
+        outcome: charge.ok
+          ? { status: <span class="str">"completed"</span>, result: charge.receipt }
+          : { status: <span class="str">"failed"</span>, error: { message: charge.error } },
+      }), context);
+    },
+  },
+  <span class="cm">// another payment failed, or the checkout was cancelled → refund</span>
+  abort: <span class="kw">async</span> (task, runtime, context) =&gt; {
+    <span class="kw">await</span> bank.<span class="fn">refund</span>(<span class="str">`payment-${task.id}`</span>);
+    <span class="kw">await</span> runtime.<span class="fn">commit</span>(() =&gt; ({ status: <span class="str">"terminal"</span>, outcome: { status: <span class="str">"aborted"</span> } }), context);
+  },
+});
+
+<span class="cm">// The parent waits for all payments; the first failure aborts the rest:</span>
+<span class="kw">return</span> { status: <span class="str">"waiting"</span>, checkpoint: { phase: <span class="str">"decide"</span>, payments }, on: payments, policy: <span class="str">"failFast"</span> };</pre>
+
+  <h3>5.6 Durable application state (documents)</h3>
+  <pre><span class="kw">const</span> Todos = <span class="fn">defineDoc</span>({
+  kind: <span class="str">"app.todos"</span>, version: 1, scope: <span class="str">"conversation"</span>,
+  history: <span class="str">"rewindable"</span>, fork: <span class="str">"asOf"</span>, <span class="cm">// a fork starts with the parent's todos at the fork point</span>
+  initial: () =&gt; ({ items: [] }),
+});
+
+<span class="kw">const</span> Todo = <span class="fn">defineExtension</span>({
+  name: <span class="str">"todo"</span>,
+  tools: [
+    <span class="fn">defineTool</span>({
+      name: <span class="str">"todo"</span>, description: <span class="str">"Add an item to your todo list"</span>,
+      parameters: Type.<span class="fn">Object</span>({ item: Type.<span class="fn">String</span>() }),
+      execute: <span class="kw">async</span> (args, api, context) =&gt; {
+        <span class="kw">await</span> api.<span class="fn">commit</span>(<span class="kw">async</span> (tx) =&gt; {
+          <span class="kw">const</span> todos = <span class="kw">await</span> tx.<span class="fn">doc</span>(Todos, api.conversationId);
+          todos.items.<span class="fn">push</span>(args.item);
+        }, context);
+        <span class="kw">return</span> { content: [{ type: <span class="str">"text"</span>, text: <span class="str">`Added ${args.item}`</span> }] };
+      },
+    }),
+  ],
+  <span class="cm">// the model sees the list before every request</span>
+  sections: [
+    <span class="fn">section</span>(<span class="str">"todos"</span>, <span class="kw">async</span> (input, context) =&gt; {
+      <span class="kw">const</span> todos = <span class="kw">await</span> input.read.<span class="fn">snapshot</span>(Todos, input.conversationId, context);
+      <span class="kw">return</span> todos?.items.<span class="fn">join</span>(<span class="str">"\n"</span>) || <span class="kw">undefined</span>;
+    }),
+  ],
+});
+
+<span class="cm">// a UI subscribes to the committed value</span>
+<span class="kw">const</span> todos = <span class="kw">await</span> harness.<span class="fn">documentState</span>(Todos, channel.id, context);
+todos?.<span class="fn">subscribe</span>((value) =&gt; <span class="fn">renderTodos</span>(value?.items ?? []));</pre>
+
+  <h3>5.7 Watching &amp; steering from a remote client</h3>
+  <pre><span class="cm">// A second client joins the thread while the agent is working.</span>
+<span class="kw">const</span> view = <span class="kw">await</span> thread.<span class="fn">viewState</span>(context);
+<span class="fn">render</span>(view.value);
+view.<span class="fn">subscribe</span>((value) =&gt; <span class="fn">render</span>(value));
+
+<span class="cm">// For a remote client: watch() delivers the exact operations of every commit,</span>
+<span class="cm">// small enough to send over a socket. watchEvents() maps commits to the pi</span>
+<span class="cm">// coding agent's familiar events (more bytes on the wire).</span>
+
+<span class="cm">// And steers it: the message joins the running work after the current tool calls.</span>
+<span class="kw">await</span> thread.<span class="fn">submit</span>(
+  { type: <span class="str">"input"</span>, content: <span class="str">"Check the staging logs first"</span>, whenBusy: <span class="str">"steer"</span> }, context);</pre>
+</section>
+
+<!-- ============================== 6 ============================== -->
+<section id="k8s">
+  <h2 class="sec"><span class="num">6</span>Kubernetes deployment</h2>
+
+  <div class="callout warn">
+    <p><strong>The key constraint:</strong> one process owns a storage at a time (built-in backends have no cross-process locking). The natural k8s unit is therefore <strong>one Pod = one harness over one storage</strong>. Scale out by running multiple Pods (each its own agent/storage), not by scaling replicas of the same storage.</p>
+  </div>
+
+  <h3>6.1 Architecture</h3>
+  <svg viewBox="0 0 920 470" width="100%" style="max-width:880px; display:block; margin: 8px auto;" font-family="-apple-system, Segoe UI, sans-serif">
+    <!-- cluster -->
+    <rect x="10" y="10" width="900" height="450" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <text x="30" y="40" font-size="15" font-weight="700" fill="#334155">Kubernetes cluster</text>
+
+    <!-- external clients -->
+    <rect x="40" y="70" width="180" height="120" rx="10" fill="#eaf1fd" stroke="#93b4f5"/>
+    <text x="130" y="98" font-size="14" font-weight="600" fill="#1e3a8a" text-anchor="middle">External callers</text>
+    <text x="130" y="122" font-size="12" fill="#4a5568" text-anchor="middle">CI · webhooks · bots</text>
+    <text x="130" y="140" font-size="12" fill="#4a5568" text-anchor="middle">UIs (HTTP + SSE/WS)</text>
+    <text x="130" y="162" font-size="11" fill="#64748b" text-anchor="middle">POST /tasks · GET /stream</text>
+
+    <!-- service -->
+    <rect x="270" y="95" width="130" height="70" rx="10" fill="#e7f5ec" stroke="#7fc49a"/>
+    <text x="335" y="126" font-size="13" font-weight="600" fill="#166534" text-anchor="middle">Service</text>
+    <text x="335" y="146" font-size="11" fill="#3f6212" text-anchor="middle">pi-agent :80→8787</text>
+
+    <!-- pod -->
+    <rect x="450" y="70" width="430" height="180" rx="12" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
+    <text x="466" y="96" font-size="14" font-weight="700" fill="#334155">Pod (replicas: 1, Recreate)</text>
+
+    <!-- api server -->
+    <rect x="470" y="112" width="185" height="60" rx="8" fill="#eaf1fd" stroke="#93b4f5"/>
+    <text x="562" y="138" font-size="12.5" font-weight="600" fill="#1e3a8a" text-anchor="middle">HTTP/WS API server</text>
+    <text x="562" y="157" font-size="11" fill="#4a5568" text-anchor="middle">(your code)</text>
+
+    <!-- harness -->
+    <rect x="675" y="112" width="190" height="60" rx="8" fill="#fdf1e0" stroke="#e3b577"/>
+    <text x="770" y="138" font-size="12.5" font-weight="600" fill="#92400e" text-anchor="middle">Harness</text>
+    <text x="770" y="157" font-size="11" fill="#7c5a1e" text-anchor="middle">resume() on startup</text>
+
+    <!-- env -->
+    <rect x="470" y="186" width="395" height="44" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="667" y="213" font-size="12" fill="#334155" text-anchor="middle">NodeExecutionEnv — cwd=/work (repo PVC)</text>
+
+    <!-- arrow api→harness -->
+    <line x1="655" y1="142" x2="675" y2="142" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- PVCs -->
+    <rect x="450" y="290" width="200" height="90" rx="10" fill="#fdecec" stroke="#e5a3a3"/>
+    <text x="550" y="318" font-size="13" font-weight="600" fill="#991b1b" text-anchor="middle">PVC /data</text>
+    <text x="550" y="340" font-size="11.5" fill="#7f1d1d" text-anchor="middle">agent.sqlite</text>
+    <text x="550" y="358" font-size="11" fill="#9f4a4a" text-anchor="middle">(harness storage)</text>
+
+    <rect x="680" y="290" width="200" height="90" rx="10" fill="#fdecec" stroke="#e5a3a3"/>
+    <text x="780" y="318" font-size="13" font-weight="600" fill="#991b1b" text-anchor="middle">PVC /work</text>
+    <text x="780" y="340" font-size="11.5" fill="#7f1d1d" text-anchor="middle">repository checkout</text>
+    <text x="780" y="358" font-size="11" fill="#9f4a4a" text-anchor="middle">(tool execution)</text>
+
+    <!-- arrows pod→pvcs -->
+    <line x1="560" y1="250" x2="550" y2="290" stroke="#c27878" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="790" y1="250" x2="780" y2="290" stroke="#c27878" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- secret -->
+    <rect x="40" y="300" width="180" height="80" rx="10" fill="#f5f3ff" stroke="#b6a9e8"/>
+    <text x="130" y="330" font-size="13" font-weight="600" fill="#5b21b6" text-anchor="middle">Secret</text>
+    <text x="130" y="352" font-size="11.5" fill="#6d28d9" text-anchor="middle">ANTHROPIC_API_KEY</text>
+    <text x="130" y="370" font-size="11.5" fill="#6d28d9" text-anchor="middle">OPENAI_API_KEY</text>
+
+    <!-- arrows -->
+    <line x1="220" y1="130" x2="270" y2="130" stroke="#64748b" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="400" y1="130" x2="450" y2="130" stroke="#64748b" stroke-width="2" marker-end="url(#arr)"/>
+    <line x1="130" y1="300" x2="130" y2="190" stroke="#a78bda" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+    <path d="M 130 190 L 130 260 L 440 260" fill="none" stroke="#a78bda" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+
+    <!-- restart loop note -->
+    <rect x="270" y="300" width="150" height="80" rx="10" fill="#fffbeb" stroke="#e6c96b"/>
+    <text x="345" y="328" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Crash loop</text>
+    <text x="345" y="348" font-size="11" fill="#a16207" text-anchor="middle">k8s restarts Pod →</text>
+    <text x="345" y="366" font-size="11" fill="#a16207" text-anchor="middle">resume() continues</text>
+
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#64748b"/>
+      </marker>
+    </defs>
+  </svg>
+  <p class="figcap">One Pod owns one harness over one SQLite file on a PVC. External callers submit tasks over HTTP; progress streams back over SSE/WebSocket.</p>
+
+  <h3>6.2 Step by step</h3>
+  <ol>
+    <li><strong>Image.</strong> Node base with the app (harness + API server):</li>
+  </ol>
+  <pre><span class="cm"># Dockerfile</span>
+<span class="kw">FROM</span> node:24-bookworm-slim
+<span class="kw">WORKDIR</span> /app
+<span class="kw">COPY</span> package*.json ./
+<span class="kw">RUN</span> npm ci
+<span class="kw">COPY</span> . .
+<span class="kw">EXPOSE</span> 8787
+<span class="kw">CMD</span> [<span class="str">"node"</span>, <span class="str">"dist/server.js"</span>]</pre>
+
+  <ol start="2">
+    <li><strong>Server code.</strong> Wrap the harness in a small HTTP server:
+      <ul>
+        <li>On startup: <code class="inline">Harness.open(sqlite at /data/agent.sqlite, …)</code> → <code class="inline">harness.resume()</code> → serve. Mark ready only after resume completes.</li>
+        <li><code class="inline">POST /tasks</code> with <code class="inline">{ conversationId?, content, requestId }</code> → <code class="inline">root.submit(…)</code>; return submission id + status.</li>
+        <li><code class="inline">GET /stream?conversationId=…&amp;cursor=…</code> → SSE from <code class="inline">watchEvents()</code>; cursor = last event id → lossless reconnect.</li>
+        <li><code class="inline">POST /steer</code> → <code class="inline">submit({ whenBusy: "steer" })</code>.</li>
+        <li>Auth middleware on all routes (whoever can use the route runs the agent on your API credits).</li>
+      </ul>
+    </li>
+    <li><strong>Manifest.</strong></li>
+  </ol>
+  <pre><span class="cm"># k8s.yaml</span>
+<span class="kw">apiVersion</span>: v1
+<span class="kw">kind</span>: PersistentVolumeClaim
+<span class="kw">metadata</span>: { name: pi-agent-data }
+<span class="kw">spec</span>:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 20Gi } }
+---
+<span class="kw">apiVersion</span>: v1
+<span class="kw">kind</span>: PersistentVolumeClaim
+<span class="kw">metadata</span>: { name: pi-agent-work }
+<span class="kw">spec</span>:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 50Gi } }
+---
+<span class="kw">apiVersion</span>: apps/v1
+<span class="kw">kind</span>: Deployment
+<span class="kw">metadata</span>: { name: pi-agent }
+<span class="kw">spec</span>:
+  replicas: 1                      <span class="cm"># one process owns the storage</span>
+  strategy: { type: Recreate }     <span class="cm"># never two Pods on the same PVC</span>
+  selector: { matchLabels: { app: pi-agent } }
+  template:
+    metadata: { labels: { app: pi-agent } }
+    spec:
+      containers:
+        - name: agent
+          image: REGISTRY/pi-durable-app:0.1.0
+          ports: [{ containerPort: 8787 }]
+          envFrom: [{ secretRef: { name: pi-agent-keys } }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: work, mountPath: /work }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8787 }
+          readinessProbe:
+            httpGet: { path: /ready, port: 8787 }   <span class="cm"># ready once resume() done</span>
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: pi-agent-data } }
+        - { name: work, persistentVolumeClaim: { claimName: pi-agent-work } }
+---
+<span class="kw">apiVersion</span>: v1
+<span class="kw">kind</span>: Service
+<span class="kw">metadata</span>: { name: pi-agent }
+<span class="kw">spec</span>:
+  selector: { app: pi-agent }
+  ports: [{ port: 80, targetPort: 8787 }]</pre>
+
+  <ol start="4">
+    <li><strong>Failure behavior.</strong></li>
+  </ol>
+  <table>
+    <tr><th style="width:230px">Failure</th><th>What happens</th></tr>
+    <tr><td>Pod crash / restart</td><td>k8s restarts the Pod on the same PVC → <code class="inline">harness.resume()</code> continues interrupted runs from checkpoints. Known <code class="inline">requestId</code>s are retrievable via <code class="inline">harness.submission(id)</code>.</td></tr>
+    <tr><td>Node loss / reschedule</td><td>Same, as long as the PVC follows (RWO volume re-attaches to the new node). Use <code class="inline">Recreate</code> so two Pods never race for the storage.</td></tr>
+    <tr><td>Hard power loss mid-commit</td><td>The newest un-fsynced SQLite commit may be lost. Worst case: one step reruns (replay-safe tools) or is reported interrupted to the model. Acceptable for most agent work; use a Postgres-backed storage backend if you need stronger guarantees.</td></tr>
+    <tr><td>Image update / rolling deploy</td><td><code class="inline">Recreate</code> stops the old Pod, starts the new one, which resumes unfinished work. Registry code updates are picked up automatically (conversations store extension names, not code).</td></tr>
+  </table>
+
+  <h3>6.3 Scaling patterns</h3>
+  <ul>
+    <li><strong>Many agents (recommended):</strong> N Deployments, each with its own PVC + Service → N independent durable agents. This is the intended pattern and gives clean isolation.</li>
+    <li><strong>HA failover for one agent:</strong> with built-in SQLite, failover = a new Pod attaching to the same PVC (Recreate handles it). With a Postgres-backed custom storage backend (small interface + conformance suite), any Pod can take over — true multi-replica HA.</li>
+    <li><strong>Per-conversation isolation:</strong> the <code class="inline">env</code> function builds an execution environment per conversation from its <code class="inline">cwd</code>, so different conversations can point at different directories or containers without touching the harness. A custom env can even set one id per container so equal ids see the same files.</li>
+    <li><strong>Many humans, one agent:</strong> clients attach to the same Pod's API; forks give threads their own conversations; ownership kinds decide what aborts reach.</li>
+  </ul>
+
+  <h3>6.4 Adjacent options</h3>
+  <table>
+    <tr><th style="width:200px">Option</th><th>What it gives you</th></tr>
+    <tr><td><strong>agent-sandbox CRD</strong> (sigs.k8s.io)</td><td>Ready-made k8s example running the <em>pi coding agent</em> (TUI) with Sandbox CRD + PVCs + Secret. Good reference for image/PVC patterns, but it targets the interactive TUI agent, not Pi Durable.</td></tr>
+    <tr><td><strong>Temporal (pi-temporal)</strong></td><td>Temporal Workers as the execution engine over shared storage; automatic failover across machines without building your own Postgres backend. It's a retrofit of the pi coding agent (keeps its session files + TUI), not pi-durable itself — but it validates the "transcript is the state, re-open on any machine" model.</td></tr>
+    <tr><td><strong>Vercel durable-harness</strong></td><td>Runs the same Harness with World-log storage. Its <code class="inline">chatRoute</code> (POST message → SSE stream, GET reconnect with cursor, steer kind) is the best reference implementation for your k8s API server.</td></tr>
+  </table>
+</section>
+
+<!-- ============================== 7 ============================== -->
+<section id="comms">
+  <h2 class="sec"><span class="num">7</span>Communication &amp; task submission</h2>
+
+  <h3>7.1 The in-process API (what your server wraps)</h3>
+  <table>
+    <tr><th style="width:200px">Operation</th><th>Call</th><th>Notes</th></tr>
+    <tr><td>Give a task</td><td><code class="inline">root.submit({ type: "input", content, requestId }, ctx)</code></td><td>Exactly-once via <code class="inline">requestId</code>; returns a Submission.</td></tr>
+    <tr><td>Wait for result</td><td><code class="inline">submission.wait(ctx)</code></td><td>Resolves <code class="inline">done</code> / <code class="inline">unanswered</code> (with reason).</td></tr>
+    <tr><td>Re-acquire after restart</td><td><code class="inline">harness.submission(id)</code></td><td>Then <code class="inline">.wait()</code> again.</td></tr>
+    <tr><td>Watch progress</td><td><code class="inline">viewState().subscribe(…)</code> / <code class="inline">watchEvents()</code></td><td>Full view first, then deltas; events match the pi coding agent's familiar shapes.</td></tr>
+    <tr><td>Steer a busy run</td><td><code class="inline">submit({ content, whenBusy: "steer" }, ctx)</code></td><td>Reaches the model at its next model call.</td></tr>
+    <tr><td>Queue behind busy work</td><td>plain <code class="inline">submit(…)</code></td><td>Joins after the current tool calls.</td></tr>
+    <tr><td>Fork a thread</td><td><code class="inline">channel.fork(entryId, { ownership: … })</code></td><td>Concurrent, independent conversation.</td></tr>
+    <tr><td>Configure agent</td><td><code class="inline">root.configure({ model, tools, instructions, cwd }, ctx)</code></td><td>Per conversation; unset fields follow the host default.</td></tr>
+    <tr><td>Manual compaction</td><td><code class="inline">root.compact("keep the failing test names", ctx)</code></td><td>Runs while the agent is working.</td></tr>
+  </table>
+
+  <h3>7.2 Recommended external contract (HTTP + SSE)</h3>
+  <p>The pattern Vercel's <code class="inline">durable-harness</code> documents, translated to k8s:</p>
+  <table>
+    <tr><th style="width:190px">Endpoint</th><th>Purpose</th></tr>
+    <tr><td><code class="inline">POST /tasks</code></td><td><code class="inline">{ conversationId?, content, requestId }</code> → durably admits the task; returns submission id + status. Client-chosen <code class="inline">requestId</code> (e.g., a CI run id) makes retries safe — same id + same content = same submission, never a duplicate run.</td></tr>
+    <tr><td><code class="inline">GET /stream?conversationId=…&amp;cursor=…</code></td><td>SSE from <code class="inline">watchEvents()</code>. No cursor → full current view + live stream. With cursor (last event id) → continues with nothing lost or repeated. 204 when idle.</td></tr>
+    <tr><td><code class="inline">POST /steer</code></td><td><code class="inline">{ conversationId, content }</code> → <code class="inline">submit({ whenBusy: "steer" })</code>; reaches the model at its next model call.</td></tr>
+    <tr><td><code class="inline">POST /fork</code></td><td>Create a thread from an entry; returns the new conversation id for further tasks.</td></tr>
+    <tr><td><code class="inline">GET /usage?conversationId=…</code></td><td>Read the <code class="inline">pi.usage</code> document (tokens/cost).</td></tr>
+  </table>
+
+  <div class="callout good">
+    <p><strong>The <code class="inline">requestId</code> pattern is the key contract.</strong> An external system — CI job, webhook, Slack bot, another agent — can safely retry any submission. This is what makes "give it tasks from the outside" robust: at-least-once delivery over HTTP becomes exactly-once execution in the harness.</p>
+  </div>
+
+  <h3>7.3 Task lifecycle (external view)</h3>
+  <pre>caller                       k8s Pod                          harness/storage
+  │  POST /tasks {content, requestId}                          │
+  ├────────────────────────────────────────────► submit ──────► commit pi.user + task
+  │  202 {submissionId}                                        │ checkpoint before model call
+  │                                                            │ model call → tool calls → …
+  │  GET /stream (SSE)                                         │ every step commits a checkpoint
+  ◄──────────────────── events (tool output, partial answers) ─┤
+  │                                                            │ run finishes → submission done
+  │  stream ends (204 on idle)                                 │
+  │                                                            │
+  │  [crash here — Pod restarts]                               │
+  │  POST /tasks {same requestId}  ──► same submission returned, work continues from last checkpoint</pre>
+
+  <h3>7.4 Multi-user steering</h3>
+  <ul>
+    <li>Any client can attach to any conversation and steer it; a steer from another request takes the session over (the previous request's stream follows along).</li>
+    <li>Forks model threads: each thread is its own conversation with its own agent config — e.g., a cheap read-only reviewer in one thread, the full coding agent in another.</li>
+    <li>Ownership kinds (<code class="inline">ownerless</code>, task-owned, conversation-owned) decide what an abort reaches — useful for access control and cleanup semantics.</li>
+  </ul>
+</section>
+
+<!-- ============================== 8 ============================== -->
+<section id="ecosystem">
+  <h2 class="sec"><span class="num">8</span>Related packages &amp; alternatives</h2>
+  <table>
+    <tr><th style="width:220px">Package / project</th><th>Relationship to Pi Durable</th></tr>
+    <tr><td><strong>pi coding agent</strong> (<code class="inline">@earendil-works/pi-coding-agent</code>)</td><td>The interactive TUI agent. Pi Durable is the framework it could be rebuilt on; they share <code class="inline">pi-ai</code>. The small coding agent demo on Pi Durable borrows the TUI components from the coding agent.</td></tr>
+    <tr><td><strong>pi-durable-subagents</strong> (community, purboo)</td><td>A pi <em>extension</em> adding durable subagent workflows to the pi coding agent: an orchestrator process + CLI (<code class="inline">pi-durable-subagents run --request &lt;id&gt; --spec &lt;file&gt;</code>, <code class="inline">send</code>, <code class="inline">status</code>, <code class="inline">events</code>, …). Exactly-once request ids for external drivers (CI/scripts), worktree writer locks, budgets, survives pi quitting/crashes/machine restarts. Complementary: drives the TUI agent's subagents durably; Pi Durable is what you build your own app on.</td></tr>
+    <tr><td><strong>pi-temporal</strong> (Temporal)</td><td>Retrofit of the pi coding agent onto Temporal Workers for cross-machine failover. Keeps pi's session files + TUI; shared storage + git bundles carry state to a new worker. Off-the-shelf HA if you don't want to build a Postgres backend.</td></tr>
+    <tr><td><strong>durable-harness</strong> (Vercel)</td><td>Runs Pi Durable's Harness on Vercel World-log storage; <code class="inline">chatRoute</code> is the reference HTTP+SSE wrapper (steer, reconnect, ownership). The best blueprint for a k8s API server.</td></tr>
+    <tr><td><strong>Cloudflare Agents SDK</strong></td><td>PiHarness integration with Durable Objects — lifecycle support that keeps work running across restarts. Same idea as Vercel, on CF infra.</td></tr>
+    <tr><td><strong>agent-sandbox</strong> (sigs.k8s.io)</td><td>Kubernetes Sandbox CRD; includes a pi coding agent example (image + PVCs + Secret + TUI attach). Reference for k8s packaging, not for Pi Durable itself.</td></tr>
+  </table>
+</section>
+
+<!-- ============================== 9 ============================== -->
+<section id="comparison">
+  <h2 class="sec"><span class="num">9</span>Comparison: Hermes Agent &amp; Agent Zero</h2>
+
+  <p>Two prominent open-source agent frameworks were compared against Pi Durable: <strong>Hermes Agent</strong> (NousResearch, Python — a personal agent centered on a messaging gateway across 25+ chat platforms plus CLI/TUI and IDE integration) and <strong>Agent Zero</strong> (agent0ai, Python + Alpine.js Web UI — a self-contained Dockerized Linux desktop the agent lives in).</p>
+
+  <h3>9.1 Hermes Agent — feature set</h3>
+  <div class="grid">
+    <div class="fcard"><h4>Tools &amp; toolsets</h4><p>70+ tools in ~28 toolsets, enabled/disabled per platform. Terminal with 7 execution backends: local, Docker, SSH, Daytona, Modal, Singularity, Vercel Sandbox.</p></div>
+    <div class="fcard"><h4>Skills</h4><p>SKILL.md standard (agentskills.io), progressive disclosure, on-demand loading.</p></div>
+    <div class="fcard"><h4>Memory</h4><p>Bounded curated MEMORY.md / USER.md plus pluggable external memory providers (Mem0, Honcho, Supermemory, …).</p></div>
+    <div class="fcard"><h4>Context</h4><p>Auto-discovers .hermes.md, AGENTS.md, CLAUDE.md, SOUL.md; <code class="inline">@ref</code> injects files, folders, git diffs and URLs inline.</p></div>
+    <div class="fcard"><h4>Checkpoints</h4><p>Auto-snapshot of the working directory before file changes; <code class="inline">/rollback</code> to undo.</p></div>
+    <div class="fcard"><h4>Cron</h4><p>Natural-language or cron schedules; jobs attach skills, deliver to any platform, pause/resume/edit.</p></div>
+    <div class="fcard"><h4>Subagents</h4><p><code class="inline">delegate_task</code> spawns child agents with isolated context, restricted toolsets, own terminals; 3 concurrent by default.</p></div>
+    <div class="fcard"><h4>Code execution</h4><p><code class="inline">execute_code</code>: Python scripts calling Hermes tools via sandboxed RPC — multi-step workflows in one LLM turn.</p></div>
+    <div class="fcard"><h4>Hooks</h4><p>Gateway hooks (logging, alerts, webhooks) + plugin hooks (tool interception, metrics, guardrails).</p></div>
+    <div class="fcard"><h4>Batch processing</h4><p>Thousands of prompts in parallel; ShareGPT-format trajectories for training data and evals.</p></div>
+    <div class="fcard"><h4>Voice</h4><p>Mic input, spoken replies, Discord voice channels, "Hey Hermes" wake word, 10+ TTS providers, STT across platforms.</p></div>
+    <div class="fcard"><h4>Browser automation</h4><p>Browserbase / Browser Use cloud, or local Chrome/Brave/Chromium/Edge via CDP.</p></div>
+    <div class="fcard"><h4>MCP</h4><p>Client over stdio/HTTP with per-server tool filtering and sampling.</p></div>
+    <div class="fcard"><h4>Provider management</h4><p>Routing by cost/speed/quality, automatic fallbacks, credential pools with key rotation, cross-session prompt caching.</p></div>
+    <div class="fcard"><h4>Clients</h4><p>CLI/TUI, 25+ messaging platform adapters, ACP for VS Code/Zed/JetBrains, OpenAI-compatible API server (Open WebUI, LobeChat, LibreChat).</p></div>
+    <div class="fcard"><h4>Platform &amp; plugins</h4><p>SQLite + FTS5 session storage with lineage tracking; plugin types: tools/hooks, memory providers, context engines; ~25k tests.</p></div>
+  </div>
+
+  <h3>9.2 Agent Zero — feature set</h3>
+  <div class="grid">
+    <div class="fcard"><h4>Agent loop</h4><p>Async <code class="inline">monologue()</code> loop via LiteLLM: OpenAI, Anthropic, Grok, OpenRouter, GitHub Copilot, local Ollama.</p></div>
+    <div class="fcard"><h4>Memory</h4><p>Built-in FAISS vector DB — main memories, conversation fragments, proven solutions; dashboard to browse/search/edit/delete.</p></div>
+    <div class="fcard"><h4>Skills</h4><p>SKILL.md standard, on-demand or pinned per chat, managed via Plugin Hub.</p></div>
+    <div class="fcard"><h4>Projects</h4><p>Isolated workspaces with dedicated agent, separate context, Git integration, secrets, model presets.</p></div>
+    <div class="fcard"><h4>Extensions</h4><p>Python lifecycle hooks for deep behavior customization; community Plugin Hub.</p></div>
+    <div class="fcard"><h4>Knowledge base</h4><p>Custom document directory the agent references and learns from.</p></div>
+    <div class="fcard"><h4>MCP</h4><p>Both client and server for tool interoperability.</p></div>
+    <div class="fcard"><h4>A2A protocol</h4><p>Agent-to-agent communication between instances via FastA2A — distributed workflows, persistent A2A conversations.</p></div>
+    <div class="fcard"><h4>Scheduler</h4><p>Run work later, repeatedly, or on demand (reports, monitoring, cleanup).</p></div>
+    <div class="fcard"><h4>Browser</h4><p>Built-in browser with DOM annotation; interactive "annotate mode" to instruct the agent on page elements.</p></div>
+    <div class="fcard"><h4>Sandbox</h4><p>Full Linux desktop in Docker; SearXNG private search; install packages on demand; framework runtime separated from execution runtime.</p></div>
+    <div class="fcard"><h4>Web UI &amp; API</h4><p>Alpine.js frontend: file editor with syntax highlighting, project/plugin/task/memory management; REST API + Socket.io WebSockets.</p></div>
+    <div class="fcard"><h4>Voice</h4><p>Local Whisper STT + Kokoro TTS plugins, independently enable/disable.</p></div>
+    <div class="fcard"><h4>Time Travel</h4><p>Snapshot history of the workspace with diff inspection and revert.</p></div>
+    <div class="fcard"><h4>Persistence</h4><p>Persistent volume at <code class="inline">/a0/usr</code> for user data, projects and runtime state.</p></div>
+  </div>
+
+  <h3>9.3 Similarities</h3>
+  <table>
+    <tr><th style="width:260px">Both have</th><th>Hermes form</th><th>Agent Zero form</th></tr>
+    <tr><td>Skills via SKILL.md (agentskills.io)</td><td>Progressive disclosure, on-demand</td><td>On-demand/pinned per chat, Plugin Hub</td></tr>
+    <tr><td>MCP support</td><td>Client</td><td>Client + server</td></tr>
+    <tr><td>Multi-agent</td><td><code class="inline">delegate_task</code> child agents</td><td>A2A between instances + per-project agents</td></tr>
+    <tr><td>Cron / scheduled tasks</td><td>Deliver to any platform, pause/resume</td><td>Run later / recurring / on demand</td></tr>
+    <tr><td>Cross-session memory</td><td>Curated files + pluggable vector providers</td><td>Built-in FAISS + dashboard</td></tr>
+    <tr><td>Browser automation</td><td>5 backends (cloud/CDP)</td><td>Built-in browser + annotate mode</td></tr>
+    <tr><td>Voice TTS/STT</td><td>10+ providers, wake word, voice channels</td><td>Local Whisper + Kokoro</td></tr>
+    <tr><td>Plugin / extension system</td><td>Tools/hooks, memory providers, context engines</td><td>Python lifecycle hooks + Plugin Hub</td></tr>
+    <tr><td>Container execution isolation</td><td>7 terminal backends incl. Docker</td><td>Everything in one Docker Linux desktop</td></tr>
+    <tr><td>Rollback / checkpoints</td><td>Auto-snapshot + <code class="inline">/rollback</code></td><td>Time Travel snapshots + diff/revert</td></tr>
+    <tr><td>Multi-provider models</td><td>Routing/fallback/credential pools</td><td>LiteLLM multi-provider</td></tr>
+    <tr><td>Many client surfaces</td><td>CLI/TUI, 25+ platforms, ACP IDE, OpenAI API</td><td>Web UI, REST/WebSocket, A2A</td></tr>
+  </table>
+
+  <h3>9.4 Key differences</h3>
+  <table>
+    <tr><th style="width:180px">Dimension</th><th>Hermes Agent</th><th>Agent Zero</th></tr>
+    <tr><td>Center of gravity</td><td>Messaging gateway + CLI/IDE — the agent lives in your chats</td><td>Single Docker "AI OS" — the Web UI is the primary surface</td></tr>
+    <tr><td>Execution model</td><td>Flexible: 7 pluggable terminal backends (local/Docker/SSH/Modal/…)</td><td>Fixed: everything inside its own Linux desktop container</td></tr>
+    <tr><td>Memory core</td><td>Curated markdown files + optional vector providers</td><td>Built-in FAISS vector DB with categories</td></tr>
+    <tr><td>Multi-agent</td><td>Child agents of one session (isolated context/toolsets)</td><td>Peer instances talking A2A</td></tr>
+    <tr><td>Unique strengths</td><td>Credential pools, batch→training trajectories, OpenAI-compat API, 25+ platforms, wake word/voice channels</td><td>Time Travel, browser annotate mode, MCP server, self-contained Docker desktop</td></tr>
+    <tr><td>Maturity signals</td><td>~25k tests, large plugin ecosystem</td><td>Smaller community project, Docker-first simplicity</td></tr>
+    <tr><td>Crash durability</td><td colspan="2"><strong>Neither has step-level durable execution.</strong> Hermes persists sessions (SQLite); Agent Zero has a persistent volume + Time Travel. If the process dies mid-tool-call, neither automatically resumes from a checkpoint with exactly-once semantics — that is precisely Pi Durable's core claim.</td></tr>
+  </table>
+
+  <h3>9.5 Can Pi Durable match or mimic them?</h3>
+  <table>
+    <tr><th style="width:210px">Feature (Hermes / A0)</th><th>Pi Durable primitive</th><th style="width:70px">Verdict</th></tr>
+    <tr><td>Tools &amp; toolsets</td><td><code class="inline">defineTool</code> + extensions; per-conversation <code class="inline">tools</code>/<code class="inline">modelTools</code>; deferred tools + tool-search for large sets</td><td>✅ 1:1 — you write the implementations</td></tr>
+    <tr><td>Skills (SKILL.md)</td><td>Extension <strong>sections</strong> reading skill files from the env (<code class="inline">section("skills", …)</code> is literally in the docs); progressive disclosure = render on demand</td><td>✅ same standard as-is</td></tr>
+    <tr><td>Persistent memory (MEMORY.md / FAISS)</td><td><strong>Documents</strong> (typed JSON, atomic with transcript, fork-aware) + sections rendering them into the prompt; vector search = a tool calling an external DB (Qdrant/Chroma/FAISS server over HTTP)</td><td>✅ files-style native · ~ vector needs a backend</td></tr>
+    <tr><td>Context files / <code class="inline">@ref</code></td><td>Sections reading AGENTS.md etc. from env; <code class="inline">@ref</code> expansion in your submit handler or as a tool</td><td>✅</td></tr>
+    <tr><td>Checkpoints / Time Travel</td><td>A snapshot tool using bash+git in the env; rollback = git reset tool; documents have rewindable history</td><td>~ trivial to build, not built-in</td></tr>
+    <tr><td>Cron / scheduled tasks</td><td><strong>Background tasks with timers that survive restarts</strong> + a scheduler submitting jobs with <code class="inline">requestId</code></td><td>✅ arguably better — survives process death</td></tr>
+    <tr><td>Subagent delegation / A2A</td><td>Owned conversations (few lines), per-subagent model/tools, concurrent; A2A = two harnesses exchanging via tools/HTTP, or one harness with many conversations</td><td>✅ native pattern</td></tr>
+    <tr><td><code class="inline">execute_code</code> sandboxed scripts</td><td><strong>Code Mode</strong> — model writes JS calling tools in a QuickJS sandbox, survives restarts</td><td>✅ same idea (JS not Python)</td></tr>
+    <tr><td>Event hooks / guardrails</td><td>Hook chains (<code class="inline">beforeTool</code>/<code class="inline">afterTool</code>) + <strong>memos</strong> (decisions survive restarts)</td><td>✅ better — crash-proof approval gates</td></tr>
+    <tr><td>Batch processing / trajectories</td><td>Programmatic loop over conversations/submissions; transcripts are stored entries → export as trajectories</td><td>~ write a batch driver, no built-in runner</td></tr>
+    <tr><td>Browser automation</td><td>Custom tool driving Playwright/CDP/Browserbase in the execution env</td><td>~ just a tool — same work in any framework</td></tr>
+    <tr><td>Voice (TTS/STT/wake word)</td><td>Client-layer: STT before submit, TTS on streamed output, wake word client-side</td><td>~ not harness territory, easy per client</td></tr>
+    <tr><td>MCP</td><td>pi ecosystem MCP support; codemode bridges tools; tool-search handles large MCP sets</td><td>✅</td></tr>
+    <tr><td>Provider routing / fallback / credential pools</td><td>pi-ai provider layer + positional prompt entries (cache stays warm); model pools with failover exist in <code class="inline">pi-durable-subagents</code>; key rotation = your server logic</td><td>~ mostly there, pooling needs glue</td></tr>
+    <tr><td>OpenAI-compatible API server</td><td>Your HTTP wrapper over submit/wait/stream — thin to implement</td><td>✅</td></tr>
+    <tr><td>25+ messaging platforms / ACP IDE</td><td>Application adapters: webhook per platform → <code class="inline">submit</code>/<code class="inline">watch</code>; channel = conversation, thread = fork maps perfectly (Earendil plan a Slack bot themselves)</td><td>~ real work (adapters), design fits exactly</td></tr>
+    <tr><td>Docker sandbox execution</td><td><strong>ExecutionEnv</strong> abstraction — container-per-conversation via env id ("one id per container" is in the docs)</td><td>✅ more flexible: per-conversation, even remote machines</td></tr>
+    <tr><td>Web UI / memory dashboard / file editor</td><td><code class="inline">watch()</code>/<code class="inline">watchEvents()</code> stream everything a UI needs; <code class="inline">documentState().subscribe()</code> for dashboards; env's <code class="inline">openDirReader</code>/<code class="inline">openBinaryReader</code> for file browsing (docs explicitly support hosts using the env directly)</td><td>~ build the UI; all primitives exist</td></tr>
+    <tr><td>Knowledge base</td><td>Section reading the docs directory from env + search tool</td><td>✅</td></tr>
+  </table>
+
+  <h3>9.6 Honest gaps (what you'd have to build)</h3>
+  <ol>
+    <li><strong>The tools themselves.</strong> Browser, vector memory, TTS/STT, image generation: Pi Durable gives the mechanism, not the implementations. Hermes's 70+ tools are years of accumulation; you start from read/write/edit/bash + codemode and add what you need.</li>
+    <li><strong>Platform adapters.</strong> Slack/Telegram/Discord/etc. webhooks are application code — each is small (webhook → submit, stream → post).</li>
+    <li><strong>Vector search.</strong> Run a DB service, expose via tool.</li>
+    <li><strong>Language ecosystem.</strong> Both competitors' plugin ecosystems are Python; Pi Durable extensions are TypeScript.</li>
+  </ol>
+
+  <h3>9.7 What Pi Durable adds that neither has</h3>
+  <ul>
+    <li><strong>Step-level durable execution:</strong> crash mid-tool-call → any new process resumes from the last checkpoint; interrupted unsafe tools reported to the model, safe ones rerun.</li>
+    <li><strong>Exactly-once submissions</strong> (<code class="inline">requestId</code>) — webhook/CI retries can't double-run work.</li>
+    <li><strong>Infinitely long conversations</strong> with background compaction and searchable history.</li>
+    <li><strong>Atomic app state</strong> (documents committed with the transcript).</li>
+    <li><strong>Malleable registry</strong> — hot-swap tools/prompts on a live agent without restart.</li>
+    <li><strong>Multiplayer steering</strong> of running conversations from any number of clients.</li>
+  </ul>
+
+  <div class="callout good">
+    <p><strong>Bottom line:</strong> every Hermes / Agent Zero feature maps onto Pi Durable primitives, mostly 1:1 (tools, skills, memory-as-documents, cron-as-background-tasks, subagents, code mode, hooks, per-conversation sandboxes). The effort is in the glue — tool implementations, platform adapters, a vector backend, and a UI. And the result would be <em>more</em> robust than either competitor, because both lack the durable-execution layer that is Pi Durable's entire reason to exist. Rough effort split for "Hermes or Agent Zero on Pi Durable": ~30% core harness wiring (days), ~50% tools + adapters (weeks), ~20% UI polish — with durability coming for free underneath all of it.</p>
+  </div>
+</section>
+
+<section id="risks">
+  <h2 class="sec"><span class="num">10</span>Risks &amp; open questions</h2>
+  <div class="callout danger"><p><strong>Experimental API.</strong> The package is explicitly experimental and the API changes without notice. Pin exact versions and expect to track releases actively.</p></div>
+  <ul>
+    <li><strong>Single-owner storage.</strong> No built-in multi-process locking or HA. Plan around it: one Pod per agent, or implement a Postgres-backed storage backend (small interface, conformance suite included) for true multi-replica failover.</li>
+    <li><strong>Commit durability window.</strong> With SQLite, the newest commits may be lost on power/host failure (per Temporal's write-up). Worst case is one step rerunning or being reported interrupted — usually fine, but know it.</li>
+    <li><strong>Execution environment security.</strong> <code class="inline">NodeExecutionEnv</code> gives tools real filesystem/shell access to the Pod. Isolate per conversation via <code class="inline">cwd</code> / custom env ids, or run tools in nested containers/sandboxes (see Vercel's sandbox pattern for the threat model). Non-replay-safe external effects can never be undone — that's on your tool design.</li>
+    <li><strong>Cost controls.</strong> Usage is tracked per conversation; hooks (<code class="inline">beforeTool</code>) + budgets are how you gate expensive or dangerous actions. Wire approval flows through memos so they survive restarts.</li>
+    <li><strong>TypeScript only (for now).</strong> Earendil says ports to other languages aren't ruled out, but the focus is TS — any JS runtime works for hosting.</li>
+  </ul>
+</section>
+
+<!-- ============================== 10 ============================== -->
+<section id="sources">
+  <h2 class="sec"><span class="num">11</span>Sources</h2>
+  <ul>
+    <li>Earendil — <a href="https://earendil.com/posts/pi-durable/">Pi Durable (announcement, Oct 2026)</a></li>
+    <li>npm — <a href="https://www.npmjs.com/package/@earendil-works/pi-durable">@earendil-works/pi-durable (package docs / README)</a></li>
+    <li>pi.dev — <a href="https://pi.dev/packages">Package Catalog</a> · <a href="https://pi.dev/packages/pi-durable-subagents">pi-durable-subagents</a></li>
+    <li>Vercel — <a href="https://vercel.com/docs/agent-harnesses/pi">Running Pi Durably on Vercel (durable-harness)</a></li>
+    <li>Cloudflare — <a href="https://developers.cloudflare.com/agents/harnesses/pi/">Pi · Cloudflare Agents docs</a></li>
+    <li>Temporal — <a href="https://temporal.io/blog/the-immortal-life-of-pi-running-the-pi-coding-agent-on-temporal">The immortal life of Pi (pi-temporal)</a></li>
+    <li>sigs.k8s.io — <a href="https://agent-sandbox.sigs.k8s.io/docs/use-cases/examples/pi-code-agent/">Pi Code Agent Sandbox Example (Kubernetes)</a></li>
+    <li>Hacker News — <a href="https://news.ycombinator.com/item?id=49925969">Pi Durable discussion</a> · <a href="https://blog.invidelabs.com/pi-coding-agent-local-models/">Pi 1.0 with local models and Pi Durable</a></li>
+    <li>Hermes Agent — <a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/overview">Features overview</a> · <a href="https://hermes-agent.nousresearch.com/docs/developer-guide/architecture">Architecture</a> · <a href="https://github.com/NousResearch/hermes-agent">GitHub (NousResearch/hermes-agent)</a></li>
+    <li>Agent Zero — <a href="https://www.agent-zero.ai/">Official site (features &amp; technology)</a> · <a href="https://github.com/agent0ai/agent-zero">GitHub (agent0ai/agent-zero)</a> · <a href="https://deepwiki.com/agent0ai/agent-zero">DeepWiki architecture</a></li>
+  </ul>
+</section>
+
+<footer>
+  Generated from primary sources · project: /Users/karim/Projects/PiDurable · companion markdown: INVESTIGATION.md
+</footer>
+
+</div>
+</body>
+</html>
