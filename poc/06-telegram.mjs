@@ -121,9 +121,12 @@ async function postFinalAnswer(text) {
   }
 }
 
+// key → message_id of the pending button message, so we can settle its UI later
+const approvalMsgIds = new Map();
+
 async function postApprovalRequest(key) {
   if (!ownerChatId) return false; // no bound chat yet — caller must retry later
-  await tg("sendMessage", {
+  const r = await tg("sendMessage", {
     chat_id: ownerChatId,
     text: `⚠️ The agent wants to run a sensitive action and needs your approval.\nApproval key: \`${key}\``,
     reply_markup: {
@@ -135,7 +138,20 @@ async function postApprovalRequest(key) {
       ],
     },
   });
+  approvalMsgIds.set(key, r.message_id);
   return true;
+}
+
+/** Replace the live buttons with a settled result line (no reply_markup → buttons gone). */
+async function settleApprovalUi(key, decision, decidedBy) {
+  const msgId = approvalMsgIds.get(key);
+  if (msgId === undefined || !ownerChatId) return;
+  const label = decision === "approved" ? "✅ APPROVED" : "❌ DENIED";
+  await tg("editMessageText", {
+    chat_id: ownerChatId,
+    message_id: msgId,
+    text: `🔒 Sensitive action — ${label} by ${decidedBy}\nKey: \`${key}\``,
+  }).catch(() => {}); // already settled / "message is not modified" are fine
 }
 
 // --- approval detection: watch for blocked tool results with an approval key ---
@@ -181,6 +197,16 @@ function parseApprovalText(text) {
 }
 
 async function recordApproval(decision, key, decidedBy) {
+  // Idempotency: a key may be decided twice in a race (double-tap, button + text).
+  const current = await h.commit(async (tx) => {
+    const d = await tx.doc(ApprovalDoc, key, null);
+    return d === null ? null : { decision: d.decision };
+  }, ctx);
+  if (current && current.decision !== "pending") {
+    console.log(`approval: ${key} already ${current.decision}, skipping duplicate`);
+    await settleApprovalUi(key, decision, decidedBy); // still settle the UI
+    return;
+  }
   console.log(`approval: recording ${decision} for ${key} (${decidedBy})`);
   await h.commit(async (tx) => {
     const d = await tx.doc(ApprovalDoc, key, {});
@@ -188,6 +214,7 @@ async function recordApproval(decision, key, decidedBy) {
     d.decidedBy = decidedBy;
     return d;
   }, ctx);
+  await settleApprovalUi(key, decision, decidedBy);
   if (decision === "approved") {
     await root.submit(
       { type: "input", content: `The human APPROVED action key ${key}. Retry the sensitive action with the exact same arguments.`, requestId: `tg-approve-${Date.now()}` },
