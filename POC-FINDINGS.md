@@ -79,6 +79,28 @@ Flow: model calls `dangerous_action` → `beforeTool` hook blocks with approval 
 - **Approval key = f(tool, args)**, not call id: a retry gets a new callId, so decisions must key on stable action identity. Decisions live in a session doc family (writable by the app/driver, readable by hooks via `api.snapshot`) — task memos are invocation-writable only, so they can't carry external approvals.
 - **Node exits when the event loop drains** even with durable work pending (all parked on watches) — harmless for durability (reopen + resume continues), but long-lived drivers must keep something active or accept restarts.
 
+## Phase 4 — Clients: SSE ✅ PASS / Telegram 🟡 code ready, needs bot token (2026-10-18)
+
+### 4a — SSE with cursor reconnect (`poc/05-sse.mjs`, `poc/05-sse-test.mjs`)
+Server on 127.0.0.1:879x, bearer-token auth. Durable entries are cursor-addressable by entry id; ephemeral progress events (tool start/end, usage) are best-effort.
+
+| Test | Result |
+|---|---|
+| Client A from cursor 0, dropped mid-run | Captured entries up to id 10 |
+| Client B reconnects from cursor=10 | Captured the rest; run_end observed |
+| Merged A∪B vs full transcript | **Identical — no lost, no duplicated entries** |
+| Duplicate `POST /submit` same requestId | Idempotent (202, one execution) |
+
+**Gate: PASS.**
+
+### Findings
+- **Durable entries arrive via**: attach/overflow `snapshot`, `message_end.entry`, `tool_execution_end.entry`, and placed user submissions (fetched by id from the `submission` event). There is no standalone per-entry live event — SSE must extract entries from those carriers.
+- Cursor semantics: entry ids are monotonic per conversation; server sends strictly `id > cursor`; client-side dedup makes delivery exactly-once across reconnects.
+
+### 4b — Telegram long-polling bot (`poc/06-telegram.mjs`) — **awaiting user's bot token**
+Written and syntax-checked; outbound-only (getUpdates long polling, no inbound ports). Features: chat-bound owner, `requestId = tg-<update_id>` (exactly-once vs Telegram retries), one throttled progress message per run, final answer on `run_end`, blocked sensitive action → inline Approve/Deny buttons → durable decision in the same ApprovalDoc family as Phase 3 → retry instruction.
+**To test end-to-end:** create a bot via @BotFather → `/newbot`, then provide the token (will be stored in gitignored `.env`).
+
 ## Assumption tracker
 
 | ID | Status | Notes |
@@ -90,6 +112,6 @@ Flow: model calls `dangerous_action` → `beforeTool` hook blocks with approval 
 | A5 subagent pattern | ✅ verified: parallel fan-out, per-role tool restrictions, owned worker conversations; task defs must be registered via extension tasks: | |
 | A6 approval hook + memo | ✅ verified: beforeTool block → durable decision in session doc family → retry allowed; survives mid-run SIGKILL. Agent cannot self-approve (only driver writes decisions) | |
 | A7 sandbox ExecutionEnv | ⏳ pending (Phase 5) | Docker daemon must be running |
-| A8 clients (SSE + Telegram) | ⏳ pending (Phase 4) | |
+| A8 clients (SSE + Telegram) | 🟡 SSE ✅ PASS (cursor reconnect exact); Telegram bot written, e2e pending user's bot token | |
 | A9 web_fetch + injection hygiene | 🟡 tool works with untrusted delimiters (Ph.1); adversarial probe pending (Ph.7) | |
 | A10 latency/usability | 🟡 data point: 5.9s trivial tool call; full battery in Phase 7 | |
