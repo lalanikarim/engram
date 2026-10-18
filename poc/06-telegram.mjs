@@ -60,6 +60,10 @@ async function startRunWatcher() {
     for (const ev of events) {
       try {
         if (ev.type === "run_end") {
+          // Clear the stale progress line so the chat doesn't look stuck; the final answer follows.
+          if (progressMsgId !== null && ownerChatId) {
+            await tg("deleteMessage", { chat_id: ownerChatId, message_id: progressMsgId }).catch(() => {});
+          }
           progressMsgId = null; // next run gets a fresh progress message
           const page = await root.commit((tx) => tx.scanEntries({ conversationId: root.id }, 10), ctx);
           const latest = page.items.find((i) => (i.kind ?? "") === "pi.assistant");
@@ -138,6 +142,15 @@ function startApprovalPoller() {
       if (!block) return;
       const m = JSON.stringify(block).match(/Approval key: ([a-f0-9]{12})/);
       if (m && !postedApprovals.has(m[1])) {
+        // Skip keys that already have a recorded decision (e.g. after a restart re-scanning history).
+        const snap = await h.commit(async (tx) => {
+          const d = await tx.doc(ApprovalDoc, m[1], null);
+          return d === null ? null : { decision: d.decision };
+        }, ctx);
+        if (snap && snap.decision !== "pending") {
+          postedApprovals.add(m[1]);
+          return;
+        }
         const sent = await postApprovalRequest(m[1]);
         if (sent) {
           postedApprovals.add(m[1]); // only mark after a real send; retry next tick until the owner chat is bound
