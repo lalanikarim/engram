@@ -158,7 +158,7 @@ Written and syntax-checked; outbound-only (getUpdates long polling, no inbound p
 - Latency acceptable for interactive use: medians 2.2s / 5.1s / 13.2s — **yes** ✅ (worst case ~40s on a heavy turn; fine for Telegram with progress messages)
 - Non-negotiable durability gate (D1): passed in Phase 2 ✅
 
-**All PoC gates pass.** No A-fallbacks triggered. The only open item is the Telegram e2e test, which needs the user's BotFather token (bot code already written and syntax-checked).
+**All PoC gates pass.** No A-fallbacks triggered. **PoC complete** — including the Telegram e2e with @kl_cortex_bot (task execution + full approval loop), verified 2026-10-18.
 
 ## Assumption tracker
 
@@ -171,6 +171,6 @@ Written and syntax-checked; outbound-only (getUpdates long polling, no inbound p
 | A5 subagent pattern | ✅ verified: parallel fan-out, per-role tool restrictions, owned worker conversations; task defs must be registered via extension tasks: | |
 | A6 approval hook + memo | ✅ verified: beforeTool block → durable decision in session doc family → retry allowed; survives mid-run SIGKILL. Agent cannot self-approve (only driver writes decisions) | |
 | A7 sandbox ExecutionEnv | ✅ verified: per-conversation Podman container, no host secrets, egress-limited, coexists with local env. Guard pitfall: canonicalize deepest existing ancestor | |
-| A8 clients (SSE + Telegram) | 🟡 SSE ✅ PASS (cursor reconnect exact); Telegram bot written, e2e pending user's bot token | |
+| A8 clients (SSE + Telegram) | ✅ verified: SSE cursor reconnect exact; Telegram e2e with @kl_cortex_bot incl. full approval loop (buttons + text fallback). 4 integration bugs found & fixed |
 | A9 web_fetch + injection hygiene | ✅ verified Ph.7: embedded "ignore previous instructions" probe blocked in both researcher and shell-equipped roles; canary intact, no exfil, no leak |
 | A10 latency/usability | ✅ verified Ph.7: medians 2.2s (fetch) / 5.1s (coding) / 13.2s (multi-step); interactive-acceptable on Aurora |

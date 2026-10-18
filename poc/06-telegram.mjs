@@ -53,10 +53,9 @@ async function tg(method, payload = {}) {
 // --- event stream → progress message + final answer on run_end ---
 let progressMsgId = null;
 let lastEditAt = 0;
-const postedApprovals = new Set();
 
-function startRunWatcher() {
-  const stream = watchEvents(h, root.id, ctx);
+async function startRunWatcher() {
+  const stream = await watchEvents(h, root.id, ctx);
   stream.start(async (events) => {
     for (const ev of events) {
       try {
@@ -111,7 +110,7 @@ async function postFinalAnswer(text) {
 }
 
 async function postApprovalRequest(key) {
-  if (!ownerChatId) return;
+  if (!ownerChatId) return false; // no bound chat yet — caller must retry later
   await tg("sendMessage", {
     chat_id: ownerChatId,
     text: `⚠️ The agent wants to run a sensitive action and needs your approval.\nApproval key: \`${key}\``,
@@ -124,12 +123,68 @@ async function postApprovalRequest(key) {
       ],
     },
   });
+  return true;
+}
+
+// --- approval detection: watch for blocked tool results with an approval key ---
+const postedApprovals = new Set();
+function startApprovalPoller() {
+  setInterval(async () => {
+    try {
+      const page = await root.commit((tx) => tx.scanEntries({ conversationId: root.id }, 20), ctx);
+      const block = page.items.find(
+        (i) => (i.kind ?? "") === "pi.tool-result" && JSON.stringify(i).includes("Approval key:"),
+      );
+      if (!block) return;
+      const m = JSON.stringify(block).match(/Approval key: ([a-f0-9]{12})/);
+      if (m && !postedApprovals.has(m[1])) {
+        const sent = await postApprovalRequest(m[1]);
+        if (sent) {
+          postedApprovals.add(m[1]); // only mark after a real send; retry next tick until the owner chat is bound
+          console.log(`poller: button posted for ${m[1]}`);
+        } else {
+          console.log("poller: no owner chat yet, will retry");
+        }
+      }
+    } catch (e) {
+      console.error("poller:", e.message);
+    }
+  }, 3000);
+}
+
+// Text fallback for users who type instead of tapping the inline buttons.
+function parseApprovalText(text) {
+  const m = text.match(/\b(approve|deny|denied|reject)\b[\s:]*([a-f0-9]{12})/i);
+  if (!m) return null;
+  return { decision: /approve/i.test(m[1]) ? "approved" : "denied", key: m[2] };
+}
+
+async function recordApproval(decision, key, decidedBy) {
+  console.log(`approval: recording ${decision} for ${key} (${decidedBy})`);
+  await h.commit(async (tx) => {
+    const d = await tx.doc(ApprovalDoc, key, {});
+    d.decision = decision;
+    d.decidedBy = decidedBy;
+    return d;
+  }, ctx);
+  if (decision === "approved") {
+    await root.submit(
+      { type: "input", content: `The human APPROVED action key ${key}. Retry the sensitive action with the exact same arguments.`, requestId: `tg-approve-${Date.now()}` },
+      ctx,
+    );
+  } else {
+    await root.submit(
+      { type: "input", content: `The human DENIED action key ${key}. Do not retry it; report that it was declined.`, requestId: `tg-deny-${Date.now()}` },
+      ctx,
+    );
+  }
 }
 
 // --- update loop (long polling; outbound only) ---
 let ownerChatId = null;
 let offset = 0;
-startRunWatcher();
+await startRunWatcher();
+startApprovalPoller();
 
 console.log("telegram bot polling…");
 while (true) {
@@ -154,6 +209,13 @@ while (true) {
       }
       const text = u.message.text?.trim();
       if (!text) continue;
+      console.log(`update ${u.update_id}: msg "${text.slice(0, 60)}"`);
+      const approval = parseApprovalText(text);
+      if (approval) {
+        postedApprovals.add(approval.key); // suppress the inline button for this key
+        await recordApproval(approval.decision, approval.key, `telegram-text:${u.message.from?.first_name ?? "user"}`);
+        continue;
+      }
       const sub = await root.submit({ type: "input", content: text, requestId: `tg-${u.update_id}` }, ctx);
       // answer arrives via the watcher's final-answer path (run_end → latest assistant entry)
       void sub;
@@ -162,42 +224,9 @@ while (true) {
       await tg("answerCallbackQuery", { callback_query_id: u.callback_query.id }).catch(() => {});
       const [decision, key] = data.split(":");
       if (key && ["approve", "deny"].includes(decision)) {
-        await h.commit(async (tx) => {
-          const d = await tx.doc(ApprovalDoc, key, {});
-          d.decision = decision === "approve" ? "approved" : "denied";
-          d.decidedBy = `telegram:${from.first_name ?? "user"}`;
-          return d;
-        }, ctx);
-        if (decision === "approve") {
-          await root.submit(
-            { type: "input", content: `The human APPROVED action key ${key} via Telegram. Retry the sensitive action with the exact same arguments.`, requestId: `tg-approve-${u.update_id}` },
-            ctx,
-          );
-        } else {
-          await root.submit(
-            { type: "input", content: `The human DENIED action key ${key} via Telegram. Do not retry it; report that it was declined.`, requestId: `tg-deny-${u.update_id}` },
-            ctx,
-          );
-        }
+        await recordApproval(decision === "approve" ? "approved" : "denied", key, `telegram:${from.first_name ?? "user"}`);
       }
     }
   }
 }
 
-// approval detection: watch for blocked tool results with an approval key
-setInterval(async () => {
-  try {
-    const page = await root.commit((tx) => tx.scanEntries({ conversationId: root.id }, 20), ctx);
-    const block = page.items.find(
-      (i) => (i.kind ?? "") === "pi.tool-result" && JSON.stringify(i).includes("Approval key:"),
-    );
-    if (!block) return;
-    const m = JSON.stringify(block).match(/Approval key: ([a-f0-9]{12})/);
-    if (m && !postedApprovals.has(m[1])) {
-      postedApprovals.add(m[1]);
-      await postApprovalRequest(m[1]);
-    }
-  } catch (e) {
-    console.error("poller:", e.message);
-  }
-}, 3000);
