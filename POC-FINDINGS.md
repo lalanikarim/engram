@@ -115,6 +115,7 @@ Outbound-only (getUpdates long polling, no inbound ports). Verified end-to-end i
 3. `postApprovalRequest` silently no-ops when no owner chat is bound yet, but the caller marked the key as posted anyway → button never retried. Now returns a success flag; poller only marks after a real send and retries each tick until the chat is bound; also skips keys whose ApprovalDoc already has a recorded decision (avoids re-posting old buttons after restart).
 4. No text path for approvals — users naturally type "I approve <key>" instead of tapping buttons. Added `parseApprovalText` (approve/deny + 12-hex key) sharing the same `recordApproval` as the button callback.
 5. Progress-message lifecycle: housekeeping events after `run_end` created a stray "⏳ thinking…" line that never cleared. Fixed by gating progress edits on `run_start`/`run_end` (`inRun` flag) and deleting the progress line at `run_end`.
+6. Approval UI stayed live after use (buttons re-tappable). Now the button message is edited to "🔒 … ✅ APPROVED / ❌ DENIED by <user>" with no reply_markup, and `recordApproval` is idempotent (double-tap / button+text races record once).
 
 ### MVP notes from e2e
 - Owner chat binding is in-memory: after a restart the first message re-binds (and re-greets). Persist `ownerChatId` in a doc for production.
