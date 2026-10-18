@@ -101,6 +101,26 @@ Server on 127.0.0.1:879x, bearer-token auth. Durable entries are cursor-addressa
 Written and syntax-checked; outbound-only (getUpdates long polling, no inbound ports). Features: chat-bound owner, `requestId = tg-<update_id>` (exactly-once vs Telegram retries), one throttled progress message per run, final answer on `run_end`, blocked sensitive action → inline Approve/Deny buttons → durable decision in the same ApprovalDoc family as Phase 3 → retry instruction.
 **To test end-to-end:** create a bot via @BotFather → `/newbot`, then provide the token (will be stored in gitignored `.env`).
 
+## Phase 5 — Sandbox execution env ✅ PASS (2026-10-18)
+
+`poc/lib/podman-sandbox.mjs` (custom ExecutionEnv) + `poc/07-sandbox.mjs`. One harness, two conversations: root → local `NodeExecutionEnv(poc/work)`, conversation B → `PodmanSandboxEnv` (per-conversation env routing via the `env(target)` factory).
+
+| Check | Result |
+|---|---|
+| No host secrets in container env (`env` scan) | ✅ none |
+| Egress blocked (`--network none`; python urlopen fails) | ✅ |
+| Host FS not mounted in container (`ls /Users`) | ✅ |
+| File tools can't escape workspace (containment guard → `permission_denied`) | ✅ |
+| Agent task in sandbox conversation: write + bash cat, output streamed back | ✅ done |
+| Bash/write land in `/sandbox` = host workspace dir | ✅ |
+| Local conversation writes to `poc/work` from the same harness | ✅ coexist |
+| Container removed on `cleanup()` | ✅ |
+
+### Design & findings
+- **Hybrid env**: code executes via `podman exec -w /sandbox <cid>` (disposable container, `sleep infinity`); file ops delegate to a host `NodeExecutionEnv` over the bind-mounted workspace dir — same files, no per-op container round-trips.
+- **Containment guard pitfall**: canonicalizing a *new* file's full path fails (`realpath` ENOENT) — must canonicalize the deepest *existing* ancestor and check containment on the lexical remainder. (Fixed in `#guard`.)
+- No host env vars cross into the container (`podman exec` inherits container env only); workspace is the only mount.
+
 ## Assumption tracker
 
 | ID | Status | Notes |
@@ -111,7 +131,7 @@ Written and syntax-checked; outbound-only (getUpdates long polling, no inbound p
 | A4 compaction on local model | ⏳ pending (Phase 6) | ctx 228k known now |
 | A5 subagent pattern | ✅ verified: parallel fan-out, per-role tool restrictions, owned worker conversations; task defs must be registered via extension tasks: | |
 | A6 approval hook + memo | ✅ verified: beforeTool block → durable decision in session doc family → retry allowed; survives mid-run SIGKILL. Agent cannot self-approve (only driver writes decisions) | |
-| A7 sandbox ExecutionEnv | ⏳ pending (Phase 5) | Docker daemon must be running |
+| A7 sandbox ExecutionEnv | ✅ verified: per-conversation Podman container, no host secrets, egress-limited, coexists with local env. Guard pitfall: canonicalize deepest existing ancestor | |
 | A8 clients (SSE + Telegram) | 🟡 SSE ✅ PASS (cursor reconnect exact); Telegram bot written, e2e pending user's bot token | |
 | A9 web_fetch + injection hygiene | 🟡 tool works with untrusted delimiters (Ph.1); adversarial probe pending (Ph.7) | |
 | A10 latency/usability | 🟡 data point: 5.9s trivial tool call; full battery in Phase 7 | |
