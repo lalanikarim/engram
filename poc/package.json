@@ -1,0 +1,16 @@
+{
+  "name": "pidurable-poc",
+  "version": "0.1.0",
+  "description": "Proof-of-concept: a durable, local-model project-brain agent on pi-durable — agentic loop, crash recovery, subagents, approvals, SSE, Telegram client, sandboxed execution, compaction, benchmarks.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0"
+  }
+}

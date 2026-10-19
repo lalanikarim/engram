@@ -22,7 +22,7 @@ Rule: **each phase has a pass/fail gate.** A failed gate stops the PoC and trigg
 ## 1. Environment prerequisites (Phase 0)
 
 - [ ] Confirm what Unsloth on Aurora is actually serving (model + quant + context window) — use the `unsloth` skill (`inspect`/report). Record: model id, quant, max context, tokens/sec if exposed.
-- [ ] Endpoint reachable from the dev machine; **API key set in config** (user will provide when ready) — e.g. `.env` with `UNSLOTH_API_KEY`, never committed.
+- [x] Endpoint reachable from the dev machine; API key via `OPENAI_BASE_URL`/`OPENAI_API_KEY` in gitignored `poc/.env` (template: `poc/.env.example`).
 - [x] Node ≥ 22.19 available (v22.23.1 ✓).
 - [x] Container engine: **Podman** (VM running; run/exec/bind-mounts/`--network none` all verified — see POC-FINDINGS.md Phase 0). Docker not required.
 - [ ] Scratch project dir: `poc/` in this repo (not yet a git repo — init when scaffolding starts).
