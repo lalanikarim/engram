@@ -10,6 +10,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
 import { webFetchTool } from "./lib/web-fetch.mjs";
 import { delegateTool, workerTask } from "./lib/worker.mjs";
+import { loadDotEnv } from "./lib/env.mjs";
+loadDotEnv();
 
 const ctx = BACKGROUND_CONTEXT;
 const WORK = fileURLToPath(new URL("./work", import.meta.url));
@@ -24,7 +26,7 @@ registry.install(defineExtension({ name: "delegate", tools: [dTool], tasks: [wor
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/subagents.sqlite"),
   {
-    models: auroraModels(),
+    models: await auroraModels(),
     registry,
     env: () => new NodeExecutionEnv({ cwd: WORK }),
   },
@@ -34,7 +36,7 @@ h.resume();
 
 const root = await h.root(ctx, {
   agent: {
-    model: { provider: "aurora", modelId: auroraModelId() },
+    model: { provider: "aurora", modelId: await auroraModelId() },
     thinkingLevel: "medium",
     tools: [dTool], // orchestrator gets ONLY delegate — workers get their role tools
   },

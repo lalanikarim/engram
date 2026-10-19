@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
 import { PodmanSandboxEnv } from "./lib/podman-sandbox.mjs";
+import { loadDotEnv } from "./lib/env.mjs";
+loadDotEnv();
 
 const ctx = BACKGROUND_CONTEXT;
 const WORK = fileURLToPath(new URL("./work", import.meta.url));
@@ -27,7 +29,7 @@ let sandboxConvId;
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/sandbox.sqlite"),
   {
-    models: auroraModels(),
+    models: await auroraModels(),
     registry,
     env: (target) => {
       if (target.conversationId === sandboxConvId) return sandbox;
@@ -39,14 +41,14 @@ const h = await Harness.open(
 h.resume();
 
 const root = await h.root(ctx, {
-  agent: { model: { provider: "aurora", modelId: auroraModelId() }, thinkingLevel: "medium" },
+  agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "medium" },
 });
 
 // second conversation routed to the sandbox
 const b = await h.createConversation({ ownership: { kind: "ownerless" } }, ctx);
 sandboxConvId = b.id;
 await b.configure(
-  { model: { provider: "aurora", modelId: auroraModelId() }, thinkingLevel: "medium" },
+  { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "medium" },
   ctx,
 );
 

@@ -11,6 +11,8 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
+import { loadDotEnv } from "./lib/env.mjs";
+loadDotEnv();
 
 const mode = process.argv[2];
 if (!["kill", "resume", "dup"].includes(mode)) {
@@ -28,7 +30,7 @@ registry.install(CodingTools);
 const h = await Harness.open(
   await openNodeSqliteStorage(DB),
   {
-    models: auroraModels(),
+    models: await auroraModels(),
     registry,
     env: () => new NodeExecutionEnv({ cwd: WORK }),
   },
@@ -42,7 +44,7 @@ const KILL_TASK =
 
 if (mode === "kill") {
   const root = await h.root(ctx, {
-    agent: { model: { provider: "aurora", modelId: auroraModelId() } },
+    agent: { model: { provider: "aurora", modelId: await auroraModelId() } },
   });
   const sub = await root.submit({ type: "input", content: KILL_TASK, requestId: "ph2-kill" }, ctx);
   console.log(`SUBMITTED id=${sub.id}`);
@@ -94,7 +96,7 @@ if (mode === "resume") {
 
 if (mode === "dup") {
   const root = await h.root(ctx, {
-    agent: { model: { provider: "aurora", modelId: auroraModelId() } },
+    agent: { model: { provider: "aurora", modelId: await auroraModelId() } },
   });
   const content = "Say exactly: DUP-OK.";
   const s1 = await root.submit({ type: "input", content, requestId: "dup-1" }, ctx);

@@ -13,6 +13,8 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { fileURLToPath } from "node:url";
 import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
 import { ApprovalDoc, approvalHook, dangerousTool } from "./lib/approvals.mjs";
+import { loadDotEnv } from "./lib/env.mjs";
+loadDotEnv();
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -38,12 +40,12 @@ registry.install(defineExtension({ name: "sensitive", tools: [dangerousTool()], 
 
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/telegram.sqlite"),
-  { models: auroraModels(), registry, env: () => new NodeExecutionEnv({ cwd: WORK }) },
+  { models: await auroraModels(), registry, env: () => new NodeExecutionEnv({ cwd: WORK }) },
   ctx,
 );
 h.resume();
 const root = await h.root(ctx, {
-  agent: { model: { provider: "aurora", modelId: auroraModelId() }, thinkingLevel: "medium" },
+  agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "medium" },
 });
 
 // --- Telegram API helpers (outbound HTTPS only) ---
