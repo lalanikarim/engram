@@ -117,6 +117,11 @@ Outbound-only (getUpdates long polling, no inbound ports). Verified end-to-end i
 5. Progress-message lifecycle: housekeeping events after `run_end` created a stray "⏳ thinking…" line that never cleared. Fixed by gating progress edits on `run_start`/`run_end` (`inRun` flag) and deleting the progress line at `run_end`.
 6. Approval UI stayed live after use (buttons re-tappable). Now the button message is edited to "🔒 … ✅ APPROVED / ❌ DENIED by <user>" with no reply_markup, and `recordApproval` is idempotent (double-tap / button+text races record once).
 
+### Access control (implemented 2026-10-18)
+- Telegram bots are publicly reachable by anyone who finds the username; **BotFather has no allowlist feature** — access control must be app-side.
+- First-come owner binding was a race (a stranger could bind first). Fixed with `ALLOWED_TELEGRAM_IDS` env var (comma-separated numeric user IDs): non-listed senders get a generic "This bot is private." and can never bind the owner chat; callback queries are checked too. Owner ID captured via sender logging: `8355675626`.
+- Numeric IDs, not usernames: stable even if the username changes.
+
 ### MVP notes from e2e
 - Owner chat binding is in-memory: after a restart the first message re-binds (and re-greets). Persist `ownerChatId` in a doc for production.
 - Telegram purges updates once any client polls past them — a restart cannot replay pre-restart messages. Durable state (SQLite) is the source of truth, not the update queue.
