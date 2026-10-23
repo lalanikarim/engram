@@ -279,6 +279,10 @@ Bot-API redeliveries exactly-once.
 
 - **18/18 checks** (`app/test/telegram.test.ts`) against a real server + mock Bot API — two
   consecutive green runs. Also re-ran the Week 1 suite: 48/48 still green.
+- **Live verification (2026-10-23):** ran against the real Bot API (@kl_cortex_bot) from a
+  separate git worktree on `main` — bind, task → progress edit → final answer, and both
+  approval paths exercised by hand: Approve button → retry → action executed exactly once;
+  Deny button → agent stood down, nothing delivered. PLAN acceptance criterion #3 verified end-to-end.
 - `POST /approvals/:key` is now idempotent (409 when already decided) — protects against
   double-tap races on the inline buttons.
 - **Gotcha:** Node's strip-only mode rejects TS *parameter properties*
