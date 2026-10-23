@@ -39,6 +39,7 @@ export function renderIntakeContent(event) {
   const repo = event.repository?.full_name ?? "unknown/unknown";
   return [
     "New GitHub issue to work on.",
+    `Work on GitHub issue number: ${issue.number} (repository ${repo}).`,
     "",
     "<untrusted>",
     `repo: ${repo}`,
