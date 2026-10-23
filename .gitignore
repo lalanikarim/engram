@@ -9,6 +9,8 @@ node_modules/
 poc/data/
 poc/work/
 poc/sandbox-test/
+app/data/
+app/work/
 *.sqlite
 *.sqlite-*
 
