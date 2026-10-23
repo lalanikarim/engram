@@ -11,6 +11,7 @@ import { ConversationMeta } from "./meta.ts";
 import { loadModelConfig, localModels, modelId } from "./model.ts";
 import { buildRegistry, ROOT_INSTRUCTIONS } from "./registry.ts";
 import { createServer } from "./server.ts";
+import { TelegramClient } from "./telegram.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
@@ -79,6 +80,21 @@ async function main() {
     console.log(`[pidurable] ready — API on http://${config.host}:${config.port} (conversation ${root.id})`);
   });
 
+  // Telegram client (optional): long polling, outbound only.
+  let telegram: TelegramClient | undefined;
+  if (config.telegram) {
+    telegram = new TelegramClient({
+      botToken: config.telegram.botToken,
+      apiBase: config.telegram.apiBase,
+      allowedIds: config.telegram.allowedIds,
+      stateFile: path.join(config.dataDir, "telegram-state.json"),
+      apiBaseUrl: `http://${config.host === "0.0.0.0" ? "127.0.0.1" : config.host}:${config.port}`,
+      apiToken: config.token,
+      rootConversationId: root.id,
+    });
+    await telegram.start();
+  }
+
   let shuttingDown = false;
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
@@ -86,6 +102,7 @@ async function main() {
     console.log(`[pidurable] ${signal} received — closing harness`);
     server.close();
     try {
+      await telegram?.stop();
       await harness.close(ctx);
     } finally {
       process.exit(0);

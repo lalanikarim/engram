@@ -266,6 +266,25 @@ Crash/double-submit coverage was pulled forward into the suite — **48/48 check
 - **Concurrent double-submit race:** two parallel `POST /tasks` with the same `requestId` → both
   202, identical submission id, exactly one user entry in the transcript.
 
+### Week 2 — Telegram client ✅ COMPLETE (2026-10-23, `feature/mvp-week2`)
+
+Long-polling Telegram client (`app/src/telegram.ts`), outbound-only: bound chat ↔ root
+conversation, forum topics ↔ forks of root (new `POST /conversations/:id/fork` endpoint,
+named after the topic), progress as one edited message per run (throttled ~2s, gated on
+run_start/run_end), final answer via new `GET /conversations/:id/entries` (SSE summaries are
+truncated — full text comes from the transcript), inline Approve/Deny buttons with settled UI,
+`approve <key>` text fallback, `ALLOWED_TELEGRAM_IDS` access control. State (bindings +
+polling offset) persists in `data/telegram-state.json`; `requestId = tg-<update_id>` keeps
+Bot-API redeliveries exactly-once.
+
+- **18/18 checks** (`app/test/telegram.test.ts`) against a real server + mock Bot API — two
+  consecutive green runs. Also re-ran the Week 1 suite: 48/48 still green.
+- `POST /approvals/:key` is now idempotent (409 when already decided) — protects against
+  double-tap races on the inline buttons.
+- **Gotcha:** Node's strip-only mode rejects TS *parameter properties*
+  (`constructor(private x: T)`) — use explicit field declarations. `tsc --noEmit` does not
+  catch this; only running under Node does.
+
 ### Parallel work merged since (2026-10-23)
 
 - **Factory PoC phase 0** (`poc-factory/`, PR #3): webhook intake adapter + G0 exactly-once gate
@@ -274,5 +293,4 @@ Crash/double-submit coverage was pulled forward into the suite — **48/48 check
 
 ### Not yet done (Week 2 per PLAN §4)
 
-Telegram client (long polling + inline approval buttons), Web UI, sandbox sidecar execution
-env, and the D14 security-checklist pass.
+Web UI, sandbox sidecar execution env, and the D14 security-checklist pass.

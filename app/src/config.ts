@@ -44,6 +44,13 @@ export type AppConfig = {
   httpTools: HttpToolSpec[];
   /** Tool names that require human approval before execution. */
   gatedTools: string[];
+  /** Telegram client (PLAN §4 D8–9). Null when TELEGRAM_BOT_TOKEN is unset. */
+  telegram: {
+    botToken: string;
+    allowedIds: number[];
+    /** Bot API base override (default https://api.telegram.org/bot<token>); tests point this at a mock. */
+    apiBase?: string;
+  } | null;
 };
 
 function resolveDir(value: string | undefined, fallback: string): string {
@@ -77,6 +84,17 @@ export function loadConfig(): AppConfig {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
+    telegram: process.env.TELEGRAM_BOT_TOKEN
+      ? {
+          botToken: process.env.TELEGRAM_BOT_TOKEN,
+          allowedIds: (process.env.ALLOWED_TELEGRAM_IDS ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map(Number),
+          apiBase: process.env.TELEGRAM_API_BASE || undefined,
+        }
+      : null,
   };
 }
 
