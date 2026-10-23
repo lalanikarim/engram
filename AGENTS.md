@@ -2,14 +2,18 @@
 
 ## What this is
 
-A proof-of-concept validating **pi-durable** as the foundation for a durable, local-model
-"project brain" agent. All PoC gates passed (see `POC-FINDINGS.md`). The next phase — a 2-week
-MVP — is specified in `PLAN.md`. Do not start MVP work until the user says go.
+A durable, local-model "project brain" agent on **pi-durable**. The PoC validated the
+foundation (all gates passed — see `POC-FINDINGS.md`); the 2-week MVP per `PLAN.md` is in
+progress. **MVP Week 1 (core) is complete** — see the progress log at the bottom of
+`POC-FINDINGS.md`. Week 2 (Telegram client, Web UI, sandbox sidecar, hardening) not started.
 
 ## Repo layout
 
 - `poc/` — standalone PoC scripts (`00`–`10`) + shared libs in `poc/lib/`
-- `poc/.env` — local secrets (gitignored); template in `poc/.env.example`
+- `app/` — the MVP agent (TS, run natively by Node ≥22.19): `src/` (server, extensions),
+  `test/api.test.ts` (live-model integration suite), `roles.json`/`tools.json` (declarative
+  config), `kb/` (knowledge base), `Dockerfile`. Run: `cd app && npm install && npm start`.
+- `poc/.env` / `app/.env` — local secrets (gitignored); templates in `.env.example`
 - `POC-PLAN.md` / `POC-FINDINGS.md` — assumptions register and results; `POC-FINDINGS.md`
   doubles as the durable progress log — update it when work completes
 

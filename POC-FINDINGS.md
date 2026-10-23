@@ -203,3 +203,52 @@ Outbound-only (getUpdates long polling, no inbound ports). Verified end-to-end i
 | A8 clients (SSE + Telegram) | ✅ verified: SSE cursor reconnect exact; Telegram e2e with @kl_cortex_bot incl. full approval loop (buttons + text fallback). 4 integration bugs found & fixed |
 | A9 web_fetch + injection hygiene | ✅ verified Ph.7: embedded "ignore previous instructions" probe blocked in both researcher and shell-equipped roles; canary intact, no exfil, no leak |
 | A10 latency/usability | ✅ verified Ph.7: medians 2.2s (fetch) / 5.1s (coding) / 13.2s (multi-step); interactive-acceptable on Aurora |
+
+---
+
+# MVP Progress Log
+
+## Week 1 — core ✅ COMPLETE (2026-10-23, branch `feature/mvp-week1`)
+
+Scope per PLAN §4: scaffold + API server + extensions/tools. All verified by the live-model
+integration suite (`app/test/api.test.ts`, **31/31 checks pass** against Aurora).
+
+### What shipped (in `app/`)
+
+- **Scaffold (D1–2):** TypeScript sources run natively by Node ≥22.19 (no compiler, no build
+  step — same in the container: `node:24-alpine` + `npm ci --omit=dev`). `Harness.open(sqlite)`
+  → `resume()`; `/health` + `/ready`; model auto-discovered from the OpenAI-compatible endpoint.
+  All deps pinned via `package-lock.json`. Dockerfile built and smoke-tested (`podman build`,
+  container boots, discovers model, serves API).
+- **API server (D3–4):** bearer-token auth on every route; `POST /tasks` (exactly-once
+  `requestId`), `GET /stream` (SSE with cursor reconnect from `watchEvents()`),
+  `GET/POST /conversations` (create with sanitized `cwd` → per-conversation workspace under
+  `work/<cwd>`), `POST /steer` (`whenBusy: "steer"`).
+- **Extensions & tools (D5–7):** CodingTools scoped per conversation via the harness env;
+  `web_fetch` (`replay: "safe"`, `<untrusted>` delimiters); `kb_search` (ripgrep + Node
+  fallback over `kb/`); approval hook + `GET /approvals` (pending discovered from durable
+  transcript markers) + `POST /approvals/:key`; subagent `delegate` tool with role configs
+  from `roles.json` (researcher = web-only, worker = files+shell) and parallel fan-out with
+  `failFast`; config-driven HTTP tool loader (`tools.json` → generated `defineTool` wrappers).
+
+### Findings / gotchas learned (new since the PoC)
+
+- **Approval discovery:** blocked calls leave a machine-parseable marker in the tool-result
+  entry; `GET /approvals` scans recent entries per conversation. Parsing must be
+  brace-balanced — args JSON nests objects, so a non-greedy regex truncates it (caught by tests).
+- **Task state commits:** commit `{status: "terminal", outcome}` — the harness stores it as
+  `completing` until owned work drains; `"completing"` itself is not a valid `NextTaskState`.
+  The PoC's JS used `"completing"` and worked, but the typed API requires `"terminal"`.
+- **Branded IDs:** `ConversationId`/`TaskId`/`EntryId` are branded in TS (plain numbers at
+  runtime) — casts needed when passing plain numbers.
+- **`watchEvents()` stream listener** receives `(events, context)`; do not pass a context arg
+  to `stream.start()` (the PoC's extra arg was harmless JS but is a type error).
+- **Worker state must be a discriminated union** (`{phase:"spawn"} | {phase:"wait",convId}`)
+  or phase narrowing in `defineTask` collapses to `never`.
+
+### Not yet done (Week 2 per PLAN §4)
+
+Telegram client (long polling + inline approval buttons), Web UI, sandbox sidecar execution
+env, crash/double-submit hardening tests, README-level docs. The Week 1 suite re-verifies the
+durability semantics that Week 2's hardening gate will stress (`requestId` exactly-once is
+already covered).
