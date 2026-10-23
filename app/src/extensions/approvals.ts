@@ -27,11 +27,27 @@ export const ApprovalDoc = defineDocFamily<ApprovalState, JsonValue>({
 
 export type ApprovalRequest = { key: string; tool: string; args: Record<string, unknown> };
 
-/** Stable approval key for a call: identical args on retry map to the same key. */
+/** Canonical JSON: object keys sorted recursively, so logically identical args serialize identically. */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+      out[k] = canonicalize((value as Record<string, unknown>)[k]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Stable approval key for a call: logically identical args map to the same key even when the model
+ * re-serializes them with a different property order (verified by the integration suite).
+ */
 export function approvalKeyFor(name: string, arguments_: unknown): string {
   return createHash("sha1")
     .update(name)
-    .update(JSON.stringify(arguments_ ?? {}))
+    .update(JSON.stringify(canonicalize(arguments_ ?? {})))
     .digest("hex")
     .slice(0, 12);
 }

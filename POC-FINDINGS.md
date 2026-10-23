@@ -233,6 +233,11 @@ integration suite (`app/test/api.test.ts`, **31/31 checks pass** against Aurora)
 
 ### Findings / gotchas learned (new since the PoC)
 
+- **Approval keys must canonicalize args.** The first key was `sha1(tool + JSON.stringify(args))` —
+  but the model re-serializes retried calls with a *different property order* (`{to, message}` vs
+  `{message, to}`), producing a new key and re-blocking an already-approved action. Fix:
+  recursively sort object keys before hashing (logical args → stable key). The PoC never hit this
+  because its demo tool had a single argument (no ordering ambiguity) — the integration suite caught it.
 - **Approval discovery:** blocked calls leave a machine-parseable marker in the tool-result
   entry; `GET /approvals` scans recent entries per conversation. Parsing must be
   brace-balanced — args JSON nests objects, so a non-greedy regex truncates it (caught by tests).
@@ -246,9 +251,22 @@ integration suite (`app/test/api.test.ts`, **31/31 checks pass** against Aurora)
 - **Worker state must be a discriminated union** (`{phase:"spawn"} | {phase:"wait",convId}`)
   or phase narrowing in `defineTask` collapses to `never`.
 
+### Hardening tests added early (2026-10-23, same branch)
+
+Crash/double-submit coverage was pulled forward into the suite — **48/48 checks pass**
+(two consecutive green runs):
+
+- **SIGKILL mid-run → restart → resume:** killed while a `bash` tool call is in flight; after
+  restart the run settles, the interrupted tool surfaces as an explicit error entry (no silent
+  re-run), the side effect executes exactly once, and the final answer lands. Note: without an
+  explicit "continue if interrupted" instruction the local model *chooses to stop* at the
+  interruption — a behavioral property, not a durability failure.
+- **Pending approval survives crash:** block → SIGKILL while pending → restart → `GET /approvals`
+  still lists the key → approve → retry executes exactly once.
+- **Concurrent double-submit race:** two parallel `POST /tasks` with the same `requestId` → both
+  202, identical submission id, exactly one user entry in the transcript.
+
 ### Not yet done (Week 2 per PLAN §4)
 
 Telegram client (long polling + inline approval buttons), Web UI, sandbox sidecar execution
-env, crash/double-submit hardening tests, README-level docs. The Week 1 suite re-verifies the
-durability semantics that Week 2's hardening gate will stress (`requestId` exactly-once is
-already covered).
+env, and the D14 security-checklist pass.

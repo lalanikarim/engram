@@ -13,6 +13,7 @@
 //   9. config-driven HTTP tool
 //  10. steering a running conversation
 import { spawn, type ChildProcess } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -76,9 +77,14 @@ writeFileSync(
 );
 
 const TOKEN = "test-token";
-let server: ChildProcess;
-try {
-  server = spawn("node", [path.join(APP_ROOT, "src", "main.ts")], {
+const BASE = `http://127.0.0.1:18930`;
+
+// Server lifecycle: the crash tests SIGKILL the server and restart it over the same data dir.
+const servers: ChildProcess[] = [];
+const serverLogs = new Map<ChildProcess, string>();
+
+function spawnServer(): ChildProcess {
+  const proc = spawn("node", [path.join(APP_ROOT, "src", "main.ts")], {
     env: {
       ...process.env,
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? pocEnv.OPENAI_BASE_URL,
@@ -94,15 +100,32 @@ try {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-} catch (err) {
-  console.error("failed to spawn server:", err);
-  process.exit(2);
+  serverLogs.set(proc, "");
+  proc.stdout?.on("data", (d) => serverLogs.set(proc, (serverLogs.get(proc) ?? "") + String(d)));
+  proc.stderr?.on("data", (d) => serverLogs.set(proc, (serverLogs.get(proc) ?? "") + String(d)));
+  servers.push(proc);
+  return proc;
 }
-let serverLog = "";
-server.stdout?.on("data", (d) => (serverLog += String(d)));
-server.stderr?.on("data", (d) => (serverLog += String(d)));
 
-const BASE = `http://127.0.0.1:18930`;
+async function waitReady(proc: ChildProcess): Promise<boolean> {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await api("GET", "/ready");
+      if (r.status === 200 && r.json?.ready === true) return true;
+    } catch {
+      // server not up yet
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+async function crashAndRestart(): Promise<ChildProcess> {
+  for (const p of servers) if (!p.killed) p.kill("SIGKILL");
+  // Let the killed process release the port before rebinding.
+  await new Promise((r) => setTimeout(r, 1500));
+  return spawnServer();
+}
 
 // ---- test helpers ----
 let passed = 0;
@@ -222,6 +245,28 @@ class Stream {
   }
 }
 
+/** Diagnostic: dump transcript entries whose JSON record contains `filter` (read-only). */
+function dumpEntries(dbPath: string, filter: string): void {
+  try {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    const rows = db
+      .prepare("SELECT id, conversation_id, record FROM entries WHERE record LIKE ? ORDER BY id")
+      .all(`%${filter}%`) as Array<{ id: number; conversation_id: number; record: string }>;
+    for (const row of rows) {
+      const rec = JSON.parse(row.record) as any;
+      const texts = (rec.model ?? [])
+        .flatMap((m: any) => (Array.isArray(m.content) ? m.content : []))
+        .filter((c: any) => c.type === "text")
+        .map((c: any) => c.text)
+        .join(" ");
+      console.log(`    entry ${row.id} conv=${row.conversation_id} kind=${rec.kind}: ${texts.slice(0, 400)}`);
+    }
+    db.close();
+  } catch (err) {
+    console.log("    dump failed:", String(err));
+  }
+}
+
 const RUN_TIMEOUT = 180_000;
 
 async function submit(content: string, requestId: string, conversationId?: number): Promise<number> {
@@ -231,22 +276,12 @@ async function submit(content: string, requestId: string, conversationId?: numbe
 }
 
 async function main() {
-  // wait for readiness
-  let ready = false;
-  for (let i = 0; i < 60 && !ready; i++) {
-    try {
-      const r = await api("GET", "/ready");
-      ready = r.status === 200 && r.json?.ready === true;
-    } catch {
-      // server not up yet
-    }
-    if (!ready) await new Promise((r) => setTimeout(r, 500));
-  }
-  if (!ready) {
-    console.error("server never became ready:\n" + serverLog);
+  let server = spawnServer();
+  if (!(await waitReady(server))) {
+    console.error("server never became ready:\n" + (serverLogs.get(server) ?? ""));
     process.exit(1);
   }
-  const rootStream = new Stream(1);
+  let rootStream = new Stream(1);
 
   console.log("\n[1] auth + health");
   check("no token → 401", (await api("GET", "/health", undefined, "")).status === 401);
@@ -286,7 +321,11 @@ async function main() {
   console.log("\n[5] web_fetch tool");
   const sub5 = await submit("Use the web_fetch tool to fetch https://example.com and tell me in one sentence what the page is about.", "t-web");
   check("web run completes", await rootStream.waitForRunEnd(sub5, RUN_TIMEOUT));
-  check("answer references the page", rootStream.assistantTexts().some((t) => /example\.com|example domain/i.test(t)));
+  // Objective: the fetched page content reached the transcript (not dependent on answer phrasing).
+  check(
+    "fetched page content in transcript",
+    rootStream.toolResultTexts("web_fetch").some((t) => /example\.com|example domain/i.test(t)),
+  );
 
   console.log("\n[6] kb_search tool");
   const sub6 = await submit("Use kb_search to find the phrase KB-PHRASE-XYZ-42 and quote exactly what line you found.", "t-kb");
@@ -353,12 +392,119 @@ async function main() {
     check("steering influenced the final turn (informational)", /STEERED/.test(final), "model did not echo STEERED");
   }
 
+  console.log("\n[11] crash recovery: SIGKILL mid-run → restart → resume");
+  const sub11 = await submit(
+    "Do exactly this, in order: (1) run the bash command `sleep 6 && echo SLEPT` and wait for it to finish; " +
+    "(2) then run the bash command `echo tick >> counter.txt`; " +
+    "(3) then say exactly: CRASH-DONE. If a step's command comes back interrupted, continue with the next step. Do not do anything else.",
+    "t-crash",
+  );
+  const intoBash = await rootStream.waitFor(
+    (e) => e.event === "event" && e.data.type === "tool_execution_start" && JSON.stringify(e.data.args ?? {}).includes("sleep 6"),
+    RUN_TIMEOUT,
+  );
+  check("killed mid-run (bash in flight)", Boolean(intoBash));
+  if (intoBash) {
+    await new Promise((r) => setTimeout(r, 1000)); // ensure we are inside the sleep before killing
+    server = await crashAndRestart();
+    rootStream.close();
+    check("server restarts and becomes ready", await waitReady(server));
+    rootStream = new Stream(1);
+    check("resumed run completes after restart", await rootStream.waitForRunEnd(sub11, RUN_TIMEOUT));
+    // The in-flight bash must surface as an explicit interrupted error (no silent re-run).
+    check(
+      "interrupted tool surfaced as error entry",
+      rootStream.toolResultTexts("bash").some((t) => /interrupted/i.test(t)),
+    );
+    const counterPath = path.join(dirs.work, "counter.txt");
+    const ticks = existsSync(counterPath)
+      ? readFileSync(counterPath, "utf8").trim().split("\n").filter((l) => l === "tick").length
+      : 0;
+    check("side effect executed exactly once after crash", ticks === 1, `ticks=${ticks}`);
+    check("final answer contains CRASH-DONE", rootStream.assistantTexts().some((t) => t.includes("CRASH-DONE")));
+  }
+
+  console.log("\n[12] pending approval survives crash");
+  const sub12 = await submit(
+    'Use the send_message tool to send the message "hello from crash test" to "bob". If it is blocked pending human approval, report the approval key and stop — do not retry.',
+    "t-crash-appr",
+  );
+  check("approval run completes", await rootStream.waitForRunEnd(sub12, RUN_TIMEOUT));
+  check(
+    "send_message blocked (pre-crash)",
+    rootStream.toolResultTexts("send_message").some((t) => t.includes("BLOCKED")),
+  );
+  const appr12 = await api("GET", "/approvals");
+  const pending12 = (appr12.json?.approvals ?? []).find(
+    (a: any) => a.tool === "send_message" && JSON.stringify(a.args).includes("bob"),
+  );
+  check("pending approval found pre-crash", Boolean(pending12));
+  if (pending12) {
+    // Crash while the approval is still pending, then restart.
+    server = await crashAndRestart();
+    rootStream.close();
+    check("server restarts (approval still pending)", await waitReady(server));
+    rootStream = new Stream(1);
+    const after = await api("GET", "/approvals");
+    const stillPending = (after.json?.approvals ?? []).some((a: any) => a.key === pending12.key);
+    check("pending approval survives restart", stillPending, JSON.stringify(after.json));
+    if (stillPending) {
+      await api("POST", `/approvals/${pending12.key}`, { decision: "approved" });
+      const sub12b = await submit(
+        `The human has APPROVED action key ${pending12.key}. Retry send_message with the exact same arguments.`,
+        "t-crash-appr-retry",
+      );
+      check("post-crash retry completes", await rootStream.waitForRunEnd(sub12b, RUN_TIMEOUT));
+      // Count only this test's execution (the transcript also holds test [7]'s earlier one).
+      const executedCount = rootStream
+        .toolResultTexts("send_message")
+        .filter((t) => t.includes("ACTION EXECUTED") && t.includes("crash test"))
+        .length;
+      if (executedCount !== 1) dumpEntries(path.join(dirs.data, "agent.sqlite"), "ACTION EXECUTED");
+      check("post-crash action executed exactly once", executedCount === 1, `count=${executedCount}`);
+    } else {
+      check("post-crash approve + retry (skipped)", false);
+    }
+  } else {
+    check("crash-approval flow (skipped — no pending key)", false);
+  }
+
+  console.log("\n[13] concurrent double-submit race");
+  const [r1, r2] = await Promise.all([
+    api("POST", "/tasks", { content: "Say exactly: RACE-OK. Do not say anything else.", requestId: "t-race" }),
+    api("POST", "/tasks", { content: "Say exactly: RACE-OK. Do not say anything else.", requestId: "t-race" }),
+  ]);
+  check("both submits accepted (202)", r1.status === 202 && r2.status === 202);
+  check(
+    "race returns the same submission",
+    r1.json?.submissionId === r2.json?.submissionId,
+    `${r1.json?.submissionId} vs ${r2.json?.submissionId}`,
+  );
+  const raceStream = new Stream(1);
+  if (r1.status === 202) {
+    check("race run completes", await raceStream.waitForRunEnd(r1.json.submissionId, RUN_TIMEOUT));
+  }
+  const raceReplay = new Stream(1);
+  await raceReplay.waitFor((e) => e.event === "ready", 5000);
+  await new Promise((r) => setTimeout(r, 1500)); // let the baseline flush
+  check(
+    "exactly one user entry for the raced requestId",
+    raceReplay.userTexts().filter((t) => t.includes("RACE-OK")).length === 1,
+    `found ${raceReplay.userTexts().filter((t) => t.includes("RACE-OK")).length}`,
+  );
+  raceStream.close();
+  raceReplay.close();
+
   rootStream.close();
   echoServer.close();
-  server.kill("SIGTERM");
+  for (const p of servers) if (!p.killed) p.kill("SIGTERM");
   await new Promise((r) => setTimeout(r, 1500));
-  if (!server.killed) server.kill("SIGKILL");
-  rmSync(base, { recursive: true, force: true });
+  for (const p of servers) if (!p.killed) p.kill("SIGKILL");
+  if (failed > 0) {
+    console.log(`data dir kept for post-mortem: ${base}`);
+  } else {
+    rmSync(base, { recursive: true, force: true });
+  }
 
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
   process.exit(failed === 0 ? 0 : 1);
@@ -366,10 +512,12 @@ async function main() {
 
 main().catch(async (err) => {
   console.error("test harness error:", err);
-  try {
-    server.kill("SIGKILL");
-  } catch {
-    // already dead
+  for (const p of servers) {
+    try {
+      p.kill("SIGKILL");
+    } catch {
+      // already dead
+    }
   }
   rmSync(base, { recursive: true, force: true });
   process.exit(1);
