@@ -17,6 +17,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadFactoryDotEnv, startFactory } from "./lib/factory.mjs";
 import { startIntakeServer } from "./lib/intake.mjs";
+import { loadDotEnv } from "../poc/lib/env.mjs";
 
 const pExecFile = promisify(execFile);
 async function sh(cmd, args, opts = {}) {
@@ -34,6 +35,7 @@ const requestId = opt("--request-id", `issue-${issueNumber}`);
 const timeoutMin = Number(opt("--timeout-min", "25"));
 
 loadFactoryDotEnv();
+loadDotEnv(); // poc/.env as fallback (e.g. aurora endpoint)
 
 // ---------------------------------------------------------------------------
 // Preflight — fail fast with a clear message, no partial state.
