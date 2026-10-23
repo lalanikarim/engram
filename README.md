@@ -1,7 +1,14 @@
-# PiDurable PoC
+# PiDurable
 
-Proof-of-concept for a **durable, local-model "project brain" agent** built on
-[pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable) (Earendil's durable agent harness).
+A **durable, local-model "project brain" agent** built on
+[pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable) (Earendil's durable agent harness), plus companion proof-of-concepts.
+
+**Status:** the PoC validated every capability assumption (all gates passed —
+[`POC-FINDINGS.md`](POC-FINDINGS.md)), and the 2-week MVP per [`PLAN.md`](PLAN.md) is in progress:
+Week 1 core (API server, tools, approvals, subagents) + durability hardening are merged; Week 2
+(Telegram client, Web UI, sandbox sidecar, security pass) is next. The MVP agent lives in [`app/`](app/).
+
+## PoC — capability validation
 
 Every capability assumption in [`POC-PLAN.md`](POC-PLAN.md) was validated against a real local model
 (27B GGUF served via an OpenAI-compatible endpoint, e.g. Unsloth Studio). Results: [`POC-FINDINGS.md`](POC-FINDINGS.md).
@@ -82,6 +89,8 @@ Scripts resolve the model endpoint in this order:
 
 ```
 poc/                        PoC scripts + shared libs (poc/lib/)
+app/                        The MVP agent (TS, Dockerfile, integration suite) — see app/README.md
+poc-factory/                Companion "issue → reviewed PR" factory PoC (phase 0 merged) — see poc-factory/README.md
 POC-PLAN.md                 Assumptions register (A1–A10) + pass/fail gates
 POC-FINDINGS.md             Results, assumption tracker, gotchas (doubles as progress log)
 PLAN.md                     Full MVP build plan (2 weeks)

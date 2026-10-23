@@ -266,6 +266,12 @@ Crash/double-submit coverage was pulled forward into the suite — **48/48 check
 - **Concurrent double-submit race:** two parallel `POST /tasks` with the same `requestId` → both
   202, identical submission id, exactly one user entry in the transcript.
 
+### Parallel work merged since (2026-10-23)
+
+- **Factory PoC phase 0** (`poc-factory/`, PR #3): webhook intake adapter + G0 exactly-once gate
+  (8/8 checks) for the companion "issue → reviewed PR" project. Phases 1–6 pending — status table
+  in `poc-factory/README.md`.
+
 ### Not yet done (Week 2 per PLAN §4)
 
 Telegram client (long polling + inline approval buttons), Web UI, sandbox sidecar execution
