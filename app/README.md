@@ -26,7 +26,9 @@ workspaces under `work/`, knowledge base in `kb/`.
 ## Run tests
 
 ```bash
-npm test                  # spawns a real server over a temp dir; ~31 live-model checks
+npm test                  # spawns a real server over a temp dir; 48 live-model checks,
+                          # incl. SIGKILL mid-run recovery, pending-approval-across-crash,
+                          # and concurrent double-submit races
 ```
 
 ## API (all routes require `Authorization: Bearer <API_TOKEN>`)
