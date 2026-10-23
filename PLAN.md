@@ -144,4 +144,6 @@ Threats: (a) network attackers reaching the agent, (b) prompt injection via untr
 5. **`/kb` initial content:** instructions about how to use the agent (the agent's own usage docs — dogfooding).
 
 ## 8. Next step
-**Limited PoC first** — see `POC-PLAN.md`. No full scaffolding until the PoC passes its decision gates.
+PoC passed all gates; **Week 1 core + durability hardening are merged** (see the progress log at
+the bottom of `POC-FINDINGS.md`). Next: **Week 2** (§4) — Telegram client, Web UI, sandbox sidecar,
+D14 security-checklist pass.

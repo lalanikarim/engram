@@ -4,15 +4,19 @@
 
 A durable, local-model "project brain" agent on **pi-durable**. The PoC validated the
 foundation (all gates passed — see `POC-FINDINGS.md`); the 2-week MVP per `PLAN.md` is in
-progress. **MVP Week 1 (core) is complete** — see the progress log at the bottom of
-`POC-FINDINGS.md`. Week 2 (Telegram client, Web UI, sandbox sidecar, hardening) not started.
+progress. **MVP Week 1 (core) + durability hardening are merged** — see the progress log at the
+bottom of `POC-FINDINGS.md`. Week 2 (Telegram client, Web UI, sandbox sidecar, D14 security pass)
+is next.
 
 ## Repo layout
 
 - `poc/` — standalone PoC scripts (`00`–`10`) + shared libs in `poc/lib/`
 - `app/` — the MVP agent (TS, run natively by Node ≥22.19): `src/` (server, extensions),
-  `test/api.test.ts` (live-model integration suite), `roles.json`/`tools.json` (declarative
-  config), `kb/` (knowledge base), `Dockerfile`. Run: `cd app && npm install && npm start`.
+  `test/api.test.ts` (48-check live-model integration suite incl. crash recovery),
+  `roles.json`/`tools.json` (declarative config), `kb/` (knowledge base), `Dockerfile`.
+  Run: `cd app && npm install && npm start`; test: `npm test`.
+- `poc-factory/` — companion "issue → reviewed PR" factory PoC (phase 0 merged; phases 1–6
+  pending). See `poc-factory/README.md`.
 - `poc/.env` / `app/.env` — local secrets (gitignored); templates in `.env.example`
 - `POC-PLAN.md` / `POC-FINDINGS.md` — assumptions register and results; `POC-FINDINGS.md`
   doubles as the durable progress log — update it when work completes
