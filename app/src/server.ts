@@ -235,6 +235,74 @@ export function createServer(deps: ServerDeps): http.Server {
         return;
       }
 
+      // Full transcript entries after a cursor (Telegram final answers, Web UI history).
+      const entriesMatch = pathname.match(/^\/conversations\/(\d+)\/entries$/);
+      if (req.method === "GET" && entriesMatch) {
+        const convId = Number(entriesMatch[1]);
+        const after = Number(searchParams.get("after") ?? 0);
+        const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 100), 1), 200);
+        if (!Number.isInteger(after) || after < 0) {
+          sendJson(res, 400, { error: "after must be a non-negative integer" });
+          return;
+        }
+        const conv = await harness.conversation(cid(convId), ctx);
+        if (!conv) {
+          sendJson(res, 404, { error: `conversation ${convId} not found` });
+          return;
+        }
+        const page = await harness.commit(
+          (tx) => tx.scanEntries({ conversationId: cid(convId), minEntryId: eid(after + 1), order: "ascending" }, limit),
+          ctx,
+        );
+        sendJson(res, 200, { conversationId: convId, entries: page.items, hasMore: Boolean(page.next) });
+        return;
+      }
+
+      // Fork a conversation at its current head (e.g. Telegram forum topics → forks of the root chat).
+      const forkMatch = pathname.match(/^\/conversations\/(\d+)\/fork$/);
+      if (req.method === "POST" && forkMatch) {
+        const parentId = Number(forkMatch[1]);
+        const parent = await harness.conversation(cid(parentId), ctx);
+        if (!parent) {
+          sendJson(res, 404, { error: `conversation ${parentId} not found` });
+          return;
+        }
+        const body = await readJsonBody(req).catch((): Record<string, unknown> => ({}));
+        const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 120) : undefined;
+        const forked = await harness.commit(async (tx) => {
+          const last = await tx.scanEntries({ conversationId: cid(parentId), order: "descending" }, 1);
+          if (!last.items[0]) return null; // empty parent — nothing to fork at
+          const rec = await tx.forkConversation(cid(parentId), eid(last.items[0].id), {
+            ownership: { kind: "ownerless" },
+          });
+          if (name) {
+            const d = await tx.doc(ConversationMeta, rec.id);
+            d.name = name;
+          }
+          return rec.id;
+        }, ctx);
+        if (forked === null) {
+          // Parent has no entries yet: fall back to a fresh sibling conversation.
+          const conv = await harness.createConversation(
+            {
+              ownership: { kind: "ownerless" },
+              agent: { model: modelRef, thinkingLevel: "medium" },
+              init: async (tx, conversationId) => {
+                const d = await tx.doc(ConversationMeta, conversationId);
+                d.name = name ?? `conversation-${conversationId}`;
+                d.createdAt = Date.now();
+                return undefined;
+              },
+            },
+            ctx,
+          );
+          sendJson(res, 201, { id: conv.id, forkedFrom: parentId, fresh: true });
+          return;
+        }
+        sendJson(res, 201, { id: forked, forkedFrom: parentId, fresh: false });
+        return;
+      }
+
       if (req.method === "GET" && pathname === "/approvals") {
         const found = await harness.commit(async (tx) => {
           const convs = await tx.scanConversations({ order: "descending" }, 100);
@@ -277,13 +345,19 @@ export function createServer(deps: ServerDeps): http.Server {
           sendJson(res, 400, { error: 'body must be {decision: "approved" | "denied"}' });
           return;
         }
-        await harness.commit(async (tx) => {
+        // Idempotent: a key may be decided twice in a race (double-tap, button + text).
+        const result = await harness.commit(async (tx) => {
           const d = await tx.doc(ApprovalDoc, key, {});
+          if (d.decision !== "pending") return { already: true as const, decision: d.decision };
           d.decision = decision;
           d.decidedBy = "api";
           d.decidedAt = Date.now();
-          return undefined;
+          return { already: false as const, decision };
         }, ctx);
+        if (result.already) {
+          sendJson(res, 409, { key, error: `already ${result.decision}` });
+          return;
+        }
         sendJson(res, 200, { key, decision });
         return;
       }
