@@ -159,6 +159,7 @@ process.on("exit", () => cleanup(false));
 async function main() {
   mock.listen(MOCK_PORT, "127.0.0.1");
   for (let i = 0; i < 60; i++) {
+    if (proc.exitCode !== null) throw new Error(`server spawn died early (code ${proc.exitCode}) — port conflict?`);
     try {
       const r = await api("GET", "/ready");
       if (r.status === 200 && r.json?.ready) break;

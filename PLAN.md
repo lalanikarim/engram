@@ -144,6 +144,6 @@ Threats: (a) network attackers reaching the agent, (b) prompt injection via untr
 5. **`/kb` initial content:** instructions about how to use the agent (the agent's own usage docs — dogfooding).
 
 ## 8. Next step
-PoC passed all gates; **Week 1 core + durability hardening, the Telegram client (D8–9), and
-the Web UI (D10–11) are merged** (see the progress log at the bottom of `POC-FINDINGS.md`).
-Next: **Week 2 remainder** (§4) — sandbox sidecar execution env (D12–13), D14 security-checklist pass.
+PoC passed all gates; **Week 1 core + durability hardening, the Telegram client (D8–9), the
+Web UI (D10–11), and the sandbox sidecar (D12–13) are merged** (see the progress log at the
+bottom of `POC-FINDINGS.md`). Next: **D14** — hardening & security-checklist pass.

@@ -205,12 +205,13 @@ export function createServer(deps: ServerDeps): http.Server {
           lastEntryId: number | null;
           name: string;
           cwd: string | null;
+          sandbox: boolean;
           createdAt: number | null;
           openSubmissions: number;
         };
         const list = await harness.commit(async (tx) => {
           const page = await tx.scanConversations({ order: "descending" }, 100);
-          const out: Array<Omit<ConvSummary, "name" | "cwd" | "createdAt" | "openSubmissions">> = [];
+          const out: Array<Omit<ConvSummary, "name" | "cwd" | "sandbox" | "createdAt" | "openSubmissions">> = [];
           for (const c of page.items) {
             const last = await tx.scanEntries({ conversationId: c.id, order: "descending" }, 1);
             out.push({
@@ -241,6 +242,7 @@ export function createServer(deps: ServerDeps): http.Server {
             ...item,
             name: meta?.name || `conversation-${item.id}`,
             cwd: agentState?.cwd ?? null,
+            sandbox: meta?.sandbox === true,
             createdAt: meta?.createdAt || null,
             openSubmissions: open.get(item.id) ?? 0,
           });
@@ -252,6 +254,7 @@ export function createServer(deps: ServerDeps): http.Server {
       if (req.method === "POST" && pathname === "/conversations") {
         const body = await readJsonBody(req);
         const cwd = typeof body.cwd === "string" ? sanitizeCwd(body.cwd) : undefined;
+        const sandboxed = body.sandbox === true;
         const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 120) : undefined;
         if (cwd === null) {
           sendJson(res, 400, { error: 'cwd must be a relative directory without ".."' });
@@ -265,12 +268,13 @@ export function createServer(deps: ServerDeps): http.Server {
               const d = await tx.doc(ConversationMeta, conversationId);
               d.name = name ?? (cwd ? `project-${cwd}` : `conversation-${conversationId}`);
               d.createdAt = Date.now();
+              if (sandboxed) d.sandbox = true;
               return undefined;
             },
           },
           ctx,
         );
-        sendJson(res, 201, { id: conv.id, cwd: cwd ?? null, name: name ?? null });
+        sendJson(res, 201, { id: conv.id, cwd: cwd ?? null, name: name ?? null, sandbox: sandboxed });
         return;
       }
 

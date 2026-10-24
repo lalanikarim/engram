@@ -2,14 +2,17 @@
 
 Durable, local-model "project brain" assistant on **pi-durable**: token-auth HTTP/SSE API,
 approval-gated external actions, parallel subagents, per-conversation workspaces,
-config-driven tool extension, and a Telegram client (long polling). Runs as a single Node
-container (no build step — Node runs the TypeScript sources natively).
+config-driven tool extension, a Telegram client (long polling), and sandboxed code execution
+in disposable Podman sidecars. Runs as a single Node container (no build step — Node runs the
+TypeScript sources natively).
 
 ## Requirements
 
 - Node ≥ 22.19 (Node 24 in the container) — native TypeScript type stripping, no compiler.
 - A local OpenAI-compatible model endpoint (Unsloth on Aurora; `OPENAI_BASE_URL` + `OPENAI_API_KEY`).
 - Optional: `rg` (ripgrep) for faster `kb_search` — a dependency-free Node fallback is used otherwise.
+- Optional: Podman — required only for sandboxed conversations (`sandbox: true`). On macOS the
+  sandbox workspace must live under `$HOME` (the Podman VM shares only the home directory).
 
 ## Run locally
 
@@ -35,6 +38,10 @@ npm test                  # two live-model suites against a real server over tem
 node test/webui.test.ts   # 14 Playwright e2e checks (needs a local Playwright install —
                           # not a repo dependency): token gate, live-streamed answers,
                           # steering, approvals panel + exactly-once execution, new conversations
+
+node test/sandbox.test.ts # 13 checks (needs Podman + the sandbox image): container isolation
+                          # (no host secrets, egress blocked, host FS not mounted), workspace
+                          # mount, containment guard, per-task disposal + respawn
 ```
 
 ## Web UI
@@ -45,6 +52,21 @@ bearer-token requirement. It supports: conversation list + creation, full transc
 live streaming via SSE (cursor-based reconnect), steering a running turn, and the
 pending-approvals panel (Approve/Deny → 409-safe idempotent decisions).
 
+## Sandboxed execution (D12–13)
+
+Conversations created with `{"sandbox": true}` run their code in a **disposable Podman
+sidecar**: one container per conversation, torn down when the run ends and recreated for the
+next run. Code executes via `podman exec -w /sandbox`; the host workspace dir is bind-mounted
+at `/sandbox`, so file tools operate on the same files (guarded so paths cannot escape the
+workspace). No host env vars cross into the container, and egress is limited to
+`SANDBOX_NETWORK` (default `none`). Orphaned containers from crashed runs are removed at
+startup (name-prefix sweep).
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  -d '{"cwd": "my-project", "sandbox": true}' http://127.0.0.1:8791/conversations
+```
+
 ## API (all routes require `Authorization: Bearer <API_TOKEN>`)
 
 | Route | Purpose |
@@ -53,8 +75,8 @@ pending-approvals panel (Approve/Deny → 409-safe idempotent decisions).
 | `GET /ready` | readiness (true once the harness is open + resumed) |
 | `POST /tasks` | `{content, requestId[, conversationId]}` → exactly-once submit (202 `{submissionId}`). Resubmitting a `requestId` returns the same submission. |
 | `GET /stream?conversationId=&cursor=` | SSE: durable entries (id > cursor) + lifecycle events (`run_start`, `run_end`, `tool_execution_start`, `message_update`, `submission`). Reconnect with the last seen entry id as `cursor`. |
-| `GET /conversations` | list all conversations: id, name, cwd, createdAt, lastEntryId, openSubmissions |
-| `POST /conversations` | `{cwd?, name?}` → new conversation; `cwd` (relative, no traversal) maps to `work/<cwd>` |
+| `GET /conversations` | list all conversations: id, name, cwd, sandbox, createdAt, lastEntryId, openSubmissions |
+| `POST /conversations` | `{cwd?, name?, sandbox?}` → new conversation; `cwd` (relative, no traversal) maps to `work/<cwd>`; `sandbox: true` routes execution into a Podman sidecar |
 | `GET /conversations/:id/entries?after=&limit=` | full transcript entries after a cursor (history rendering, final-answer text) |
 | `POST /conversations/:id/fork` | `{name?}` → fork the conversation at its current head (Telegram forum topics); falls back to a fresh sibling when the parent has no entries |
 | `POST /steer` | `{content, requestId[, conversationId]}` → inject input into a running turn (`whenBusy: "steer"`) |
@@ -77,7 +99,8 @@ the first message binds as owner — always set this for real use.
 ## Configuration
 
 - **Env** (see `.env.example`): endpoint, token, host/port, dirs, `GATED_TOOLS`
-  (comma-separated tool names requiring human approval), compaction sizing, Telegram settings.
+  (comma-separated tool names requiring human approval), compaction sizing, Telegram settings,
+  sandbox image/network (`SANDBOX_IMAGE`, `SANDBOX_NETWORK`).
 - **`roles.json`** — subagent roles: name → tools + instructions (`delegate` fans jobs out to
   them in parallel; `failFast: true` short-circuits on first failure).
 - **`tools.json`** — declarative HTTP tools (name, description, method, url template with
@@ -91,4 +114,6 @@ the first message binds as owner — always set this for real use.
   approval keys are `sha1(tool + canonicalized args)` (recursively key-sorted) so logically
   identical retries — even with different JSON property order — stay idempotent.
 - Per-conversation `cwd` is sanitized (relative, no `..`) and maps inside `work/`.
+- Sandboxed conversations: code runs in a container with no host env vars, egress-limited
+  networking, and a containment guard on every file op; the workspace mount is the only bridge.
 - Web/tool output is always wrapped in `<untrusted>` delimiters; researcher subagents have no shell.

@@ -2,7 +2,8 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Harness, type ModelRef } from "@earendil-works/pi-durable";
+import { Harness, type EnvTarget, type ModelRef } from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadDotEnv } from "./dotenv.ts";
@@ -11,6 +12,7 @@ import { ConversationMeta } from "./meta.ts";
 import { loadModelConfig, localModels, modelId } from "./model.ts";
 import { buildRegistry, ROOT_INSTRUCTIONS } from "./registry.ts";
 import { createServer } from "./server.ts";
+import { SandboxManager } from "./sandbox.ts";
 import { TelegramClient } from "./telegram.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -33,10 +35,17 @@ async function main() {
 
   // Per-conversation execution environment: the conversation's agent cwd maps into the work root.
   // The root conversation (no cwd) gets the work root itself; project conversations get subdirs.
-  const envFor = (target: { conversationId: number; cwd?: string }) => {
+  // Conversations flagged sandbox=true route code execution into a disposable Podman sidecar
+  // (D12–13): no host env vars, egress-limited, files land in the same workspace dir.
+  const sandbox = new SandboxManager({
+    workRoot: config.workRoot,
+    image: config.sandbox.image,
+    network: config.sandbox.network,
+  });
+  const envFor = async (target: EnvTarget, context: Context) => {
     const dir = target.cwd ? path.join(config.workRoot, target.cwd) : config.workRoot;
     mkdirSync(dir, { recursive: true });
-    return new NodeExecutionEnv({ cwd: dir });
+    return (await sandbox.envFor(target, context)) ?? new NodeExecutionEnv({ cwd: dir });
   };
 
   console.log(`[pidurable] opening harness at ${dbPath}`);
@@ -59,6 +68,17 @@ async function main() {
     ctx,
   );
   harness.resume();
+  sandbox.attach(harness);
+
+  // Remove sandbox containers orphaned by a previous crashed run (name-prefix sweep).
+  try {
+    const orphans = await sandbox.sweepOrphans(ctx);
+    if (orphans.length > 0) {
+      console.log(`[pidurable] removed ${orphans.length} orphaned sandbox container(s): ${orphans.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[pidurable] sandbox orphan sweep failed:", (e as Error).message);
+  }
 
   const modelRef: ModelRef = { provider: "aurora", modelId: id };
   const root = await harness.root(ctx, {
@@ -103,6 +123,7 @@ async function main() {
     server.close();
     try {
       await telegram?.stop();
+      await sandbox.disposeAll(ctx);
       await harness.close(ctx);
     } finally {
       process.exit(0);

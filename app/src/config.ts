@@ -44,6 +44,11 @@ export type AppConfig = {
   httpTools: HttpToolSpec[];
   /** Tool names that require human approval before execution. */
   gatedTools: string[];
+  /** Podman sandbox for code-gen/test conversations (D12–13). */
+  sandbox: {
+    image: string;
+    network: string;
+  };
   /** Telegram client (PLAN §4 D8–9). Null when TELEGRAM_BOT_TOKEN is unset. */
   telegram: {
     botToken: string;
@@ -84,6 +89,10 @@ export function loadConfig(): AppConfig {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
+    sandbox: {
+      image: process.env.SANDBOX_IMAGE ?? "docker.io/library/python:3.12-alpine",
+      network: process.env.SANDBOX_NETWORK ?? "none",
+    },
     telegram: process.env.TELEGRAM_BOT_TOKEN
       ? {
           botToken: process.env.TELEGRAM_BOT_TOKEN,
