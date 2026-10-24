@@ -312,6 +312,30 @@ notifications only.
   false negatives. A long debugging detour was caused by checking the wrong property;
   the app itself had been rendering correctly all along.
 
+### Week 2 — sandbox sidecar ✅ COMPLETE (2026-10-24, `feature/sandbox-sidecar`)
+
+Conversations created with `{"sandbox": true}` route code execution into a **disposable Podman
+sidecar** (`app/src/sandbox.ts`): one container per conversation (`pi-sbx-*`), torn down when the
+run ends and recreated for the next run. Code executes via `podman exec -w /sandbox`; the host
+workspace dir is bind-mounted at `/sandbox`, so file tools operate on the same files through a
+guarded `NodeExecutionEnv` (containment guard: canonicalize the deepest *existing* ancestor,
+reject escapes). No host env vars cross; egress limited by `SANDBOX_NETWORK` (default `none`).
+Orphaned containers from crashed runs are swept at startup. `POST /conversations` accepts
+`sandbox`; the list response surfaces it.
+
+- **13/13 checks** (`app/test/sandbox.test.ts`, live server + Podman): conversation flag, container
+  isolation (no host secrets in `env`, egress blocked, host FS not mounted), workspace mount
+  write+read from inside, containment guard (escape attempt creates nothing on the host),
+  per-task disposal after `run_end`, respawn for the next run, files landing on the host workspace.
+- Re-ran the other suites: **api 48/48, telegram 18/18** — all green.
+- **Gotcha (cost an hour):** `watchEvents()`' stream lifetime is governed by its *acquisition
+  context* — passing the per-invocation env-factory context makes the watch die with the first
+  run, so it never sees that `run_end` (and no later run's events). Fix: derive the watch context
+  via `withCancel(BACKGROUND_CONTEXT)` so only the manager can cancel it.
+- **Gotcha:** on macOS the Podman VM shares only `$HOME` — bind-mount sources under `/tmp`
+  fail with a cryptic `statfs … no such file or directory`. Sandbox workspaces (and this
+  suite's temp dirs) must live under `$HOME`.
+
 ### Parallel work merged since (2026-10-23)
 
 - **Factory PoC phase 0** (PR #3): webhook intake adapter + G0 exactly-once gate (8/8 checks)
@@ -320,4 +344,4 @@ notifications only.
 
 ### Not yet done (Week 2 per PLAN §4)
 
-Sandbox sidecar execution env, and the D14 security-checklist pass.
+D14 security-checklist pass.

@@ -49,6 +49,11 @@ Week 2: sandbox sidecar (D12–13), D14 security pass.
 - Telegram: gate progress-message edits on `run_start`/`run_end`, and settle (edit away)
   approval buttons after a decision; make `recordApproval` idempotent.
 - Compaction summary budget = `min(0.8 × reserveTokens, model.maxTokens)`.
+- `watchEvents()` stream lifetime is governed by its **acquisition context** — a per-invocation
+  context kills the watch with that run (it never sees its own `run_end`). For long-lived
+  watchers, acquire with `withCancel(BACKGROUND_CONTEXT)` and hold the cancel yourself.
+- Sandbox bind mounts on macOS: the Podman VM shares only `$HOME` — mount sources under `/tmp`
+  fail with a cryptic `statfs … no such file or directory`.
 
 ## Style
 
