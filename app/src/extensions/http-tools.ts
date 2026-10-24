@@ -51,7 +51,7 @@ export function httpToolExtension(specs: HttpToolSpec[]) {
 
         const res = await fetch(finalUrl, {
           method,
-          headers: { "User-Agent": "Mozilla/5.0 (PiDurable)", ...(method !== "GET" ? { "content-type": "application/json" } : {}), ...spec.headers },
+          headers: { "User-Agent": "Mozilla/5.0 (Engram)", ...(method !== "GET" ? { "content-type": "application/json" } : {}), ...spec.headers },
           body: method === "GET" || Object.keys(body).length === 0 ? undefined : JSON.stringify(body),
           redirect: "follow",
           signal: AbortSignal.timeout(TIMEOUT_MS),

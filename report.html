@@ -504,7 +504,7 @@ view.<span class="fn">subscribe</span>((value) =&gt; <span class="fn">render</sp
     <!-- service -->
     <rect x="270" y="95" width="130" height="70" rx="10" fill="#e7f5ec" stroke="#7fc49a"/>
     <text x="335" y="126" font-size="13" font-weight="600" fill="#166534" text-anchor="middle">Service</text>
-    <text x="335" y="146" font-size="11" fill="#3f6212" text-anchor="middle">pi-agent :80→8787</text>
+    <text x="335" y="146" font-size="11" fill="#3f6212" text-anchor="middle">engram :80→8787</text>
 
     <!-- pod -->
     <rect x="450" y="70" width="430" height="180" rx="12" fill="#ffffff" stroke="#94a3b8" stroke-width="2"/>
@@ -596,33 +596,33 @@ view.<span class="fn">subscribe</span>((value) =&gt; <span class="fn">render</sp
   <pre><span class="cm"># k8s.yaml</span>
 <span class="kw">apiVersion</span>: v1
 <span class="kw">kind</span>: PersistentVolumeClaim
-<span class="kw">metadata</span>: { name: pi-agent-data }
+<span class="kw">metadata</span>: { name: engram-data }
 <span class="kw">spec</span>:
   accessModes: [ReadWriteOnce]
   resources: { requests: { storage: 20Gi } }
 ---
 <span class="kw">apiVersion</span>: v1
 <span class="kw">kind</span>: PersistentVolumeClaim
-<span class="kw">metadata</span>: { name: pi-agent-work }
+<span class="kw">metadata</span>: { name: engram-work }
 <span class="kw">spec</span>:
   accessModes: [ReadWriteOnce]
   resources: { requests: { storage: 50Gi } }
 ---
 <span class="kw">apiVersion</span>: apps/v1
 <span class="kw">kind</span>: Deployment
-<span class="kw">metadata</span>: { name: pi-agent }
+<span class="kw">metadata</span>: { name: engram }
 <span class="kw">spec</span>:
   replicas: 1                      <span class="cm"># one process owns the storage</span>
   strategy: { type: Recreate }     <span class="cm"># never two Pods on the same PVC</span>
-  selector: { matchLabels: { app: pi-agent } }
+  selector: { matchLabels: { app: engram } }
   template:
-    metadata: { labels: { app: pi-agent } }
+    metadata: { labels: { app: engram } }
     spec:
       containers:
         - name: agent
           image: REGISTRY/pi-durable-app:0.1.0
           ports: [{ containerPort: 8787 }]
-          envFrom: [{ secretRef: { name: pi-agent-keys } }]
+          envFrom: [{ secretRef: { name: engram-keys } }]
           volumeMounts:
             - { name: data, mountPath: /data }
             - { name: work, mountPath: /work }
@@ -631,14 +631,14 @@ view.<span class="fn">subscribe</span>((value) =&gt; <span class="fn">render</sp
           readinessProbe:
             httpGet: { path: /ready, port: 8787 }   <span class="cm"># ready once resume() done</span>
       volumes:
-        - { name: data, persistentVolumeClaim: { claimName: pi-agent-data } }
-        - { name: work, persistentVolumeClaim: { claimName: pi-agent-work } }
+        - { name: data, persistentVolumeClaim: { claimName: engram-data } }
+        - { name: work, persistentVolumeClaim: { claimName: engram-work } }
 ---
 <span class="kw">apiVersion</span>: v1
 <span class="kw">kind</span>: Service
-<span class="kw">metadata</span>: { name: pi-agent }
+<span class="kw">metadata</span>: { name: engram }
 <span class="kw">spec</span>:
-  selector: { app: pi-agent }
+  selector: { app: engram }
   ports: [{ port: 80, targetPort: 8787 }]</pre>
 
   <ol start="4">

@@ -1,5 +1,5 @@
 {
-  "name": "pidurable-poc",
+  "name": "engram-poc",
   "version": "0.1.0",
   "description": "Proof-of-concept: a durable, local-model project-brain agent on pi-durable — agentic loop, crash recovery, subagents, approvals, SSE, Telegram client, sandboxed execution, compaction, benchmarks.",
   "type": "module",

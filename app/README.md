@@ -1,4 +1,4 @@
-# pidurable-app — project-brain agent (MVP)
+# engram — project-brain agent (MVP)
 
 Durable, local-model "project brain" assistant on **pi-durable**: token-auth HTTP/SSE API,
 approval-gated external actions, parallel subagents, per-conversation workspaces,

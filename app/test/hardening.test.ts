@@ -39,7 +39,7 @@ if (!process.env.OPENAI_BASE_URL && !pocEnv.OPENAI_BASE_URL) {
 
 // Base under $HOME: part B's sandbox workspace must be bind-mountable (macOS Podman VM
 // shares only the home directory).
-const base = mkdtempSync(path.join(homedir(), ".pidurable-hardening-"));
+const base = mkdtempSync(path.join(homedir(), ".engram-hardening-"));
 const dirs = { data: path.join(base, "data"), work: path.join(base, "work"), kb: path.join(base, "kb"), config: path.join(base, "config") };
 for (const d of Object.values(dirs)) mkdirSync(d, { recursive: true });
 

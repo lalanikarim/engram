@@ -28,7 +28,7 @@ import type {
 import { ConversationMeta } from "./meta.ts";
 
 /** Name prefix for all sandbox containers; startup sweep removes orphans with this prefix. */
-export const CONTAINER_PREFIX = "pi-sbx-";
+export const CONTAINER_PREFIX = "engram-sbx-";
 
 /** Same cap as NodeExecutionEnv (2^31 - 1 ms). */
 const MAX_TIMEOUT_MS = 2_147_483_647;

@@ -35,7 +35,7 @@ if (!process.env.OPENAI_BASE_URL && !pocEnv.OPENAI_BASE_URL) {
   process.exit(2);
 }
 
-const base = mkdtempSync(path.join(tmpdir(), "pidurable-tg-"));
+const base = mkdtempSync(path.join(tmpdir(), "engram-tg-"));
 const dirs = { data: path.join(base, "data"), work: path.join(base, "work"), kb: path.join(base, "kb"), config: path.join(base, "config") };
 for (const d of Object.values(dirs)) mkdirSync(d, { recursive: true });
 

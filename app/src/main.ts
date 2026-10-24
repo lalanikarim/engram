@@ -24,11 +24,11 @@ async function main() {
   mkdirSync(config.workRoot, { recursive: true });
   mkdirSync(config.kbDir, { recursive: true });
 
-  console.log(`[pidurable] discovering local model at ${process.env.OPENAI_BASE_URL} …`);
+  console.log(`[engram] discovering local model at ${process.env.OPENAI_BASE_URL} …`);
   const discovered = await loadModelConfig();
   const models = await localModels();
   const id = await modelId();
-  console.log(`[pidurable] model: ${id} (window ${discovered.models[0].contextWindow})`);
+  console.log(`[engram] model: ${id} (window ${discovered.models[0].contextWindow})`);
 
   const registry = buildRegistry(config, id);
   const dbPath = path.join(config.dataDir, "agent.sqlite");
@@ -48,7 +48,7 @@ async function main() {
     return (await sandbox.envFor(target, context)) ?? new NodeExecutionEnv({ cwd: dir });
   };
 
-  console.log(`[pidurable] opening harness at ${dbPath}`);
+  console.log(`[engram] opening harness at ${dbPath}`);
   const harness = await Harness.open(
     await openNodeSqliteStorage(dbPath),
     {
@@ -74,10 +74,10 @@ async function main() {
   try {
     const orphans = await sandbox.sweepOrphans(ctx);
     if (orphans.length > 0) {
-      console.log(`[pidurable] removed ${orphans.length} orphaned sandbox container(s): ${orphans.join(", ")}`);
+      console.log(`[engram] removed ${orphans.length} orphaned sandbox container(s): ${orphans.join(", ")}`);
     }
   } catch (e) {
-    console.error("[pidurable] sandbox orphan sweep failed:", (e as Error).message);
+    console.error("[engram] sandbox orphan sweep failed:", (e as Error).message);
   }
 
   const modelRef: ModelRef = { provider: await providerId(), modelId: id };
@@ -97,7 +97,7 @@ async function main() {
 
   const server = createServer({ harness, root, config, modelRef });
   server.listen(config.port, config.host, () => {
-    console.log(`[pidurable] ready — API on http://${config.host}:${config.port} (conversation ${root.id})`);
+    console.log(`[engram] ready — API on http://${config.host}:${config.port} (conversation ${root.id})`);
   });
 
   // Telegram client (optional): long polling, outbound only.
@@ -119,7 +119,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[pidurable] ${signal} received — closing harness`);
+    console.log(`[engram] ${signal} received — closing harness`);
     server.close();
     try {
       await telegram?.stop();
@@ -134,6 +134,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[pidurable] fatal:", err);
+  console.error("[engram] fatal:", err);
   process.exit(1);
 });

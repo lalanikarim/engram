@@ -56,7 +56,7 @@ if (!process.env.OPENAI_BASE_URL && !pocEnv.OPENAI_BASE_URL) {
 
 // Base under $HOME (not os.tmpdir()): on macOS the Podman VM only shares the home
 // directory, so sandbox bind-mount sources must live there.
-const base = mkdtempSync(path.join(homedir(), ".pidurable-sbx-test-"));
+const base = mkdtempSync(path.join(homedir(), ".engram-sbx-test-"));
 const dirs = { data: path.join(base, "data"), work: path.join(base, "work"), kb: path.join(base, "kb"), config: path.join(base, "config") };
 for (const d of Object.values(dirs)) mkdirSync(d, { recursive: true });
 mkdirSync(path.join(dirs.work, "sbx-proj"), { recursive: true });
