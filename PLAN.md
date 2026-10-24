@@ -167,11 +167,8 @@ the agent will be exposed beyond trusted-LAN.
 | **Scheduled checks** (cron → durable submit → Telegram result) | Biggest "brain" upgrade: turns it from reactive to proactive. Low–med effort; reuses durable submit, Telegram, approvals |
 | **MCP bridge** | Makes the brain drivable by other agents (pi, herdr workers) — a shared substrate, not a siloed bot. High leverage for multi-agent setups |
 | **KB v2** (local embeddings + vector search over `/kb`) | Makes memory real; today `kb_search` is ripgrep (works, crude) |
-| **Dynamic spawning** (conversation + sandbox per ticket on demand) | Factory-style endgame; ties into SoftwareFactory |
+| **Dynamic spawning** (conversation + sandbox per ticket on demand) | Scale-out endgame: on-demand isolated project conversations |
 | Email client / Dashboards / Browser automation | Useful but narrower or read-only |
-
-**C. Cross-repo loose end** — SoftwareFactory's three files still import the removed `aurora.mjs`;
-small migration to `poc/lib/model.mjs` (`localModels`, `modelId`, …) when working in that repo.
 
 **Working recommendation:** if the goal is a *daily personal driver*, do **A (live instance +
 sleep-disable) → B: scheduled checks** first (shortest path from verified MVP to proactively
@@ -179,7 +176,7 @@ useful, reuses almost everything built). If the goal is a *multi-agent substrate
 **MCP bridge**. If the goal is *real memory/knowledge*, lead with **KB v2**.
 
 **Open questions that decide the plan:**
-1. What's the end goal — daily personal driver, multi-agent substrate, or a specific use case (e.g. the factory)?
+1. What's the end goal — daily personal driver, multi-agent substrate, or a specific use case?
 2. Where will it run long-term — this Mac, a dedicated home-server box, exposed beyond LAN? (Decides whether item 7 + sleep-disable are now or later.)
 3. Is it time to run it live, or is this still build-phase?
 
