@@ -335,6 +335,12 @@ Orphaned containers from crashed runs are swept at startup. `POST /conversations
 - **Gotcha:** on macOS the Podman VM shares only `$HOME` — bind-mount sources under `/tmp`
   fail with a cryptic `statfs … no such file or directory`. Sandbox workspaces (and this
   suite's temp dirs) must live under `$HOME`.
+- **Bug fixed post-merge (issue #14):** the ported `exec()` treated `options.timeout` as
+  *milliseconds*, but the `ExecutionEnv` contract takes *seconds* (`NodeExecutionEnv`
+  `.resolveTimeoutMs` converts ×1000; the bash tool passes model-supplied seconds through).
+  Any explicit timeout fired ~1000× too early. Fixed in both `app/src/sandbox.ts` and
+  `poc/lib/podman-sandbox.mjs` (validate finite > 0 with the same cap, convert to ms,
+  report seconds), with three deterministic regression checks added to the suite (now 16/16).
 
 ### Parallel work merged since (2026-10-23)
 

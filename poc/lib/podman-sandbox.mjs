@@ -10,6 +10,20 @@ import { dirname } from "node:path";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { FileError, ExecutionError, ok, err } from "@earendil-works/pi-durable/env";
 
+// Contract (mirrors NodeExecutionEnv.resolveTimeoutMs): `timeout` is in SECONDS.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+function resolveTimeoutMs(timeout) {
+  if (timeout === undefined) return ok(undefined);
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return err(new ExecutionError("timeout", "Invalid timeout: must be a finite number of seconds"));
+  }
+  const timeoutMs = timeout * 1000;
+  if (timeoutMs > MAX_TIMEOUT_MS) {
+    return err(new ExecutionError("timeout", `Invalid timeout: maximum is ${MAX_TIMEOUT_MS / 1000} seconds`));
+  }
+  return ok(timeoutMs);
+}
+
 export class PodmanSandboxEnv {
   constructor({ workspace, image = "docker.io/library/python:3.12-alpine", network = "none" }) {
     this.workspace = workspace; // absolute host path
@@ -53,6 +67,9 @@ export class PodmanSandboxEnv {
 
   async exec(command, options, context) {
     if (!this.ready) return err(new ExecutionError("spawn_error", "sandbox not initialized"));
+    const timeoutResult = resolveTimeoutMs(options?.timeout);
+    if (!timeoutResult.ok) return timeoutResult;
+    const timeoutMs = timeoutResult.value;
     const finalArgs = ["exec", "-w", "/sandbox", this.containerId];
     if (Array.isArray(command)) finalArgs.push(...command);
     else finalArgs.push("sh", "-lc", command);
@@ -60,11 +77,11 @@ export class PodmanSandboxEnv {
       const child = spawn("podman", finalArgs, { stdio: ["ignore", "pipe", "pipe"] });
       let timedOut = false;
       let aborted = false;
-      const timer = options?.timeout
+      const timer = timeoutMs !== undefined
         ? setTimeout(() => {
             timedOut = true;
             child.kill("SIGKILL");
-          }, options.timeout)
+          }, timeoutMs)
         : null;
       const onAbort = () => {
         aborted = true;
@@ -86,7 +103,7 @@ export class PodmanSandboxEnv {
       });
       child.on("close", (code) => {
         finish();
-        if (timedOut) resolve(err(new ExecutionError("timeout", `command timed out after ${options?.timeout}ms`)));
+        if (timedOut) resolve(err(new ExecutionError("timeout", `timeout:${options?.timeout}`)));
         else if (aborted) resolve(err(new ExecutionError("aborted", "command aborted")));
         else resolve(ok({ exitCode: code ?? 1 }));
       });
