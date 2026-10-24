@@ -1,5 +1,5 @@
 {
-  "name": "pidurable-app",
+  "name": "engram",
   "version": "0.1.0",
   "description": "pi-durable project-brain agent: durable local-model assistant with approval gates, subagents, and a token-auth HTTP/SSE API.",
   "type": "module",

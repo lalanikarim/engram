@@ -315,7 +315,7 @@ notifications only.
 ### Week 2 — sandbox sidecar ✅ COMPLETE (2026-10-24, `feature/sandbox-sidecar`)
 
 Conversations created with `{"sandbox": true}` route code execution into a **disposable Podman
-sidecar** (`app/src/sandbox.ts`): one container per conversation (`pi-sbx-*`), torn down when the
+sidecar** (`app/src/sandbox.ts`): one container per conversation (`engram-sbx-*`), torn down when the
 run ends and recreated for the next run. Code executes via `podman exec -w /sandbox`; the host
 workspace dir is bind-mounted at `/sandbox`, so file tools operate on the same files through a
 guarded `NodeExecutionEnv` (containment guard: canonicalize the deepest *existing* ancestor,

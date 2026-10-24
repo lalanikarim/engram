@@ -132,7 +132,7 @@ const settled = await (await root.submit(job, context)).wait(context); // same i
 ```
 ┌─────────────────────────────── cluster ───────────────────────────────┐
 │                                                                       │
-│  Deployment "pi-agent" (replicas: 1)                                 │
+│  Deployment "engram" (replicas: 1)                                 │
 │  ├─ Pod: node container                                              │
 │  │   ├─ HTTP/WS API server (your code)                               │
 │  │   │    POST /tasks          → root.submit({content, requestId})   │
@@ -169,24 +169,24 @@ const settled = await (await root.submit(job, context)).wait(context); // same i
    ```yaml
    apiVersion: v1
    kind: PersistentVolumeClaim
-   metadata: { name: pi-agent-data }
+   metadata: { name: engram-data }
    spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 20Gi } } }
    ---
    apiVersion: apps/v1
    kind: Deployment
-   metadata: { name: pi-agent }
+   metadata: { name: engram }
    spec:
      replicas: 1            # one process owns the storage
      strategy: { type: Recreate }   # never two Pods on the same PVC
-     selector: { matchLabels: { app: pi-agent } }
+     selector: { matchLabels: { app: engram } }
      template:
-       metadata: { labels: { app: pi-agent } }
+       metadata: { labels: { app: engram } }
        spec:
          containers:
            - name: agent
              image: REGISTRY/pi-durable-app:0.1.0
              ports: [{ containerPort: 8787 }]
-             envFrom: [{ secretRef: { name: pi-agent-keys } }]
+             envFrom: [{ secretRef: { name: engram-keys } }]
              volumeMounts:
                - { name: data, mountPath: /data }
                - { name: work, mountPath: /work }
@@ -195,13 +195,13 @@ const settled = await (await root.submit(job, context)).wait(context); // same i
              readinessProbe:
                httpGet: { path: /ready, port: 8787 }   # ready once resume() done
          volumes:
-           - { name: data, persistentVolumeClaim: { claimName: pi-agent-data } }
-           - { name: work, persistentVolumeClaim: { claimName: pi-agent-work } }
+           - { name: data, persistentVolumeClaim: { claimName: engram-data } }
+           - { name: work, persistentVolumeClaim: { claimName: engram-work } }
    ---
    apiVersion: v1
    kind: Service
-   metadata: { name: pi-agent }
-   spec: { selector: { app: pi-agent }, ports: [{ port: 80, targetPort: 8787 }] }
+   metadata: { name: engram }
+   spec: { selector: { app: engram }, ports: [{ port: 80, targetPort: 8787 }] }
    ```
 
 4. **Failure behavior**

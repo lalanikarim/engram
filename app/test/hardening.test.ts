@@ -39,7 +39,7 @@ if (!process.env.OPENAI_BASE_URL && !pocEnv.OPENAI_BASE_URL) {
 
 // Base under $HOME: part B's sandbox workspace must be bind-mountable (macOS Podman VM
 // shares only the home directory).
-const base = mkdtempSync(path.join(homedir(), ".pidurable-hardening-"));
+const base = mkdtempSync(path.join(homedir(), ".engram-hardening-"));
 const dirs = { data: path.join(base, "data"), work: path.join(base, "work"), kb: path.join(base, "kb"), config: path.join(base, "config") };
 for (const d of Object.values(dirs)) mkdirSync(d, { recursive: true });
 
@@ -269,7 +269,7 @@ async function main(): Promise<void> {
 
     // Wait for the sandbox container to appear (run is live inside it), then kill the server.
     const container = await waitFor(async () => {
-      const ps = await runPodman(["ps", "--filter", `name=pi-sbx-`, "--format", "{{.Names}}"]);
+      const ps = await runPodman(["ps", "--filter", `name=engram-sbx-`, "--format", "{{.Names}}"]);
       if (ps.code !== 0) return undefined;
       for (const name of ps.out.split("\n").map((s) => s.trim()).filter(Boolean)) {
         const inspect = await runPodman(["inspect", name, "--format", "{{json .Mounts}}"]);
@@ -282,7 +282,7 @@ async function main(): Promise<void> {
       }
       return undefined;
     }, 120_000);
-    check("sandbox container live mid-run", container !== undefined, "no pi-sbx-* container with the crash workspace found");
+    check("sandbox container live mid-run", container !== undefined, "no engram-sbx-*  container with the crash workspace found");
 
     console.log("SIGKILL server mid-run …");
     proc!.kill("SIGKILL");
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
 
     // The container for the resumed run must be disposed again when that run ends.
     const disposed = await waitFor(async () => {
-      const ps = await runPodman(["ps", "-a", "--filter", "name=pi-sbx-", "--format", "{{.Names}}"]);
+      const ps = await runPodman(["ps", "-a", "--filter", "name=engram-sbx-", "--format", "{{.Names}}"]);
       if (ps.code !== 0) return undefined;
       for (const name of ps.out.split("\n").map((s) => s.trim()).filter(Boolean)) {
         const inspect = await runPodman(["inspect", name, "--format", "{{json .Mounts}}"]);

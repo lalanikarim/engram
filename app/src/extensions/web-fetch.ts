@@ -30,7 +30,7 @@ export function webFetchTool() {
     replay: "safe", // read-only — safe to rerun after a crash
     execute: async (args: { url: string }) => {
       const res = await fetch(args.url, {
-        headers: { "User-Agent": "Mozilla/5.0 (PiDurable)" },
+        headers: { "User-Agent": "Mozilla/5.0 (Engram)" },
         redirect: "follow",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });

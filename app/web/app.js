@@ -1,11 +1,11 @@
-// PiDurable Web UI — minimal SPA (Preact + htm, no build step).
+// Engram Web UI — minimal SPA (Preact + htm, no build step).
 // Data plane is fully bearer-authenticated; this file is a public bootstrap that is
 // useless without the token (LAN-only design, see PLAN §5).
 import { h, render } from "preact";
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { html } from "/vendor/htm-preact.mjs";
 
-const TOKEN_KEY = "pidurable.token";
+const TOKEN_KEY = "engram.token";
 
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || "";
@@ -338,7 +338,7 @@ function Shell({ onLogout }) {
 function TokenScreen({ onSubmit }) {
   const [value, setValue] = useState("");
   return html`<form class="token-screen" onSubmit=${(e) => { e.preventDefault(); if (value.trim()) onSubmit(value.trim()); }}>
-    <h1>PiDurable</h1>
+    <h1>Engram</h1>
     <p>Enter the API token to open your project brain.</p>
     <input type="password" placeholder="API token" data-testid="token-input" value=${value} onInput=${(e) => setValue(e.target.value)} autofocus />
   </form>`;

@@ -1,4 +1,4 @@
-# PiDurable
+# Engram
 
 A **durable, local-model "project brain" agent** built on
 [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable) (Earendil's durable agent harness), plus companion proof-of-concepts.
