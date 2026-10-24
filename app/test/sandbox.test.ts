@@ -157,7 +157,7 @@ async function submitAndAwait(convId: number, text: string, timeoutMs = 240_000)
 
 /** Find the live sandbox container whose /sandbox mount points at WORKSPACE. */
 async function findSandboxContainer(): Promise<string | undefined> {
-  const ps = await runPodman(["ps", "--filter", "name=pi-sbx-", "--format", "{{.Names}}"]);
+  const ps = await runPodman(["ps", "--filter", "name=engram-sbx-", "--format", "{{.Names}}"]);
   if (ps.code !== 0) return undefined;
   for (const name of ps.out.split("\n").map((s) => s.trim()).filter(Boolean)) {
     const inspect = await runPodman(["inspect", name, "--format", "{{json .Mounts}}"]);
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
   console.log("submitting keep-alive task (sleep 40) …");
   const keepAlive = api("POST", "/tasks", { conversationId: convId, content: "Use the bash tool to run exactly this command: sleep 40 && echo SLEPT2\nWhen it finishes, reply with the single word SLEPT2.", requestId: `sbx-keepalive-${Date.now()}` });
   const container = await waitFor(() => findSandboxContainer(), 90_000);
-  check("sandbox container is running during a task", container !== undefined, "no pi-sbx-* container with the workspace mount found");
+  check("sandbox container is running during a task", container !== undefined, "no engram-sbx-*  container with the workspace mount found");
 
   if (container) {
     // No host secrets: none of our env vars may be visible inside the container.

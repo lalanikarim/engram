@@ -29,7 +29,7 @@ export class PodmanSandboxEnv {
     this.workspace = workspace; // absolute host path
     this.image = image;
     this.network = network;
-    this.containerId = `pi-sbx-${randomBytes(4).toString("hex")}`;
+    this.containerId = `engram-sbx-${randomBytes(4).toString("hex")}`;
     this.inner = new NodeExecutionEnv({ cwd: workspace });
     this.ready = false;
   }
