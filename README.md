@@ -5,8 +5,9 @@ A **durable, local-model "project brain" agent** built on
 
 **Status:** the PoC validated every capability assumption (all gates passed —
 [`POC-FINDINGS.md`](POC-FINDINGS.md)), and the 2-week MVP per [`PLAN.md`](PLAN.md) is in progress:
-Week 1 core (API server, tools, approvals, subagents) + durability hardening are merged; Week 2
-(Telegram client, Web UI, sandbox sidecar, security pass) is next. The MVP agent lives in [`app/`](app/).
+Week 1 core (API server, tools, approvals, subagents) + durability hardening, the Telegram
+client (D8–9), and the Web UI (D10–11) are merged; next up are the sandbox sidecar (D12–13)
+and the D14 security pass. The MVP agent lives in [`app/`](app/).
 
 ## PoC — capability validation
 
