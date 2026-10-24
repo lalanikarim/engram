@@ -15,8 +15,6 @@ Week 2: sandbox sidecar (D12–13), D14 security pass.
   `test/api.test.ts` (48-check live-model integration suite incl. crash recovery),
   `roles.json`/`tools.json` (declarative config), `kb/` (knowledge base), `Dockerfile`.
   Run: `cd app && npm install && npm start`; test: `npm test`.
-- `poc-factory/` — companion "issue → reviewed PR" factory PoC (phase 0 merged; phases 1–6
-  pending). See `poc-factory/README.md`.
 - `poc/.env` / `app/.env` — local secrets (gitignored); templates in `.env.example`
 - `POC-PLAN.md` / `POC-FINDINGS.md` — assumptions register and results; `POC-FINDINGS.md`
   doubles as the durable progress log — update it when work completes

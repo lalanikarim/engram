@@ -314,9 +314,9 @@ notifications only.
 
 ### Parallel work merged since (2026-10-23)
 
-- **Factory PoC phase 0** (`poc-factory/`, PR #3): webhook intake adapter + G0 exactly-once gate
-  (8/8 checks) for the companion "issue → reviewed PR" project. Phases 1–6 pending — status table
-  in `poc-factory/README.md`.
+- **Factory PoC phase 0** (PR #3): webhook intake adapter + G0 exactly-once gate (8/8 checks)
+  for the companion "issue → reviewed PR" project. The `poc-factory/` tree was removed from
+  this repo on 2026-10-24 (PR #11) — that work is preserved in a separate repository.
 
 ### Not yet done (Week 2 per PLAN §4)
 
