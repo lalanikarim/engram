@@ -1,5 +1,4 @@
 // Inference-host/model-agnostic OpenAI-compatible provider wiring for pi-ai.
-// Generalization of the former aurora.mjs (kept as a back-compat shim).
 //
 // Env config (all optional; defaults keep the historical behavior):
 //   PI_PROVIDER_ID  — provider id to register (default: "aurora")

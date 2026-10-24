@@ -74,8 +74,6 @@ The PoC wiring (`poc/lib/model.mjs`) is inference-host/model-agnostic — switch
 - Fallback (local dev only): a provider entry in `~/.pi/agent/models.json`, keyed by the
   provider id.
 
-`poc/lib/aurora.mjs` remains as a back-compat shim re-exporting the old names.
-
 ## Creating the Telegram bot (for `06-telegram.mjs`)
 
 1. In Telegram, message **@BotFather** and send `/newbot`.
