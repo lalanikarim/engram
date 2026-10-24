@@ -7,7 +7,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
-import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
+import { localModels, providerId, modelId } from "./lib/model.mjs";
 import { webFetchTool } from "./lib/web-fetch.mjs";
 import { delegateTool, workerTask } from "./lib/worker.mjs";
 import { loadDotEnv } from "./lib/env.mjs";
@@ -26,7 +26,7 @@ registry.install(defineExtension({ name: "delegate", tools: [dTool], tasks: [wor
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/subagents.sqlite"),
   {
-    models: await auroraModels(),
+    models: await localModels(),
     registry,
     env: () => new NodeExecutionEnv({ cwd: WORK }),
   },
@@ -36,7 +36,7 @@ h.resume();
 
 const root = await h.root(ctx, {
   agent: {
-    model: { provider: "aurora", modelId: await auroraModelId() },
+    model: { provider: await providerId(), modelId: await modelId() },
     thinkingLevel: "medium",
     tools: [dTool], // orchestrator gets ONLY delegate — workers get their role tools
   },

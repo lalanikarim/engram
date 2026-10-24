@@ -7,6 +7,7 @@ import {
   defineTask,
   defineTool,
 } from "@earendil-works/pi-durable";
+import { modelId, providerId } from "./model.mjs";
 
 const ROLE_TOOLS = {
   researcher: ["web_fetch"],
@@ -30,7 +31,7 @@ export const workerTask = defineTask({
           ownership: { kind: "task", taskId: task.id },
         });
         await configure(tx, rec.id, {
-          model: { provider: "aurora", modelId: task.input.modelId },
+          model: { provider: await providerId(), modelId: task.input.modelId },
           thinkingLevel: "medium",
           tools,
         });
@@ -111,7 +112,7 @@ export function delegateTool() {
         ids.push(
           await api.createTask(
             workerTask,
-            { ...job, modelId: "ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF" },
+            { ...job, modelId: await modelId() },
             { ownership: { kind: "task", taskId: api.taskId } },
             ctx,
           ),

@@ -1,5 +1,10 @@
-// Local OpenAI-compatible model provider wiring for pi-ai (TS port of poc/lib/aurora.mjs).
-// The served model is auto-discovered via GET /v1/models (prefers the model currently `loaded`).
+// Inference-host/model-agnostic OpenAI-compatible provider wiring for pi-ai
+// (TS port of poc/lib/model.mjs). The served model is auto-discovered via
+// GET /v1/models (prefers the model currently `loaded`).
+//
+// Env config: PI_PROVIDER_ID (provider id, default "aurora"),
+// PI_MODEL_ID (explicit model id override, skips discovery),
+// OPENAI_BASE_URL + OPENAI_API_KEY (the endpoint).
 import { createModels, createProvider, envApiKeyAuth } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 
@@ -10,11 +15,16 @@ export type DiscoveredModel = {
   maxTokens: number;
 };
 
-type EndpointConfig = { baseUrl: string; apiKey: string; models: DiscoveredModel[] };
+export type ModelConfig = {
+  providerId: string;
+  baseUrl: string;
+  apiKey: string;
+  models: DiscoveredModel[];
+};
 
-let cached: EndpointConfig | null = null;
+let cached: ModelConfig | null = null;
 
-async function discoverFromEndpoint(baseUrl: string, apiKey: string): Promise<EndpointConfig> {
+async function discoverFromEndpoint(baseUrl: string, apiKey: string): Promise<{ baseUrl: string; apiKey: string; models: DiscoveredModel[] }> {
   const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
     headers: { authorization: `Bearer ${apiKey}` },
   });
@@ -39,17 +49,34 @@ async function discoverFromEndpoint(baseUrl: string, apiKey: string): Promise<En
   };
 }
 
-export async function loadModelConfig(): Promise<EndpointConfig> {
+export async function loadModelConfig(): Promise<ModelConfig> {
   if (cached) return cached;
+  const providerId = process.env.PI_PROVIDER_ID ?? "aurora";
   const baseUrl = process.env.OPENAI_BASE_URL;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!baseUrl || !apiKey) {
     throw new Error("set OPENAI_BASE_URL + OPENAI_API_KEY (see app/.env.example)");
   }
-  cached = await discoverFromEndpoint(baseUrl, apiKey);
+  let endpoint: { baseUrl: string; apiKey: string; models: DiscoveredModel[] };
+  if (process.env.PI_MODEL_ID) {
+    // Explicit model id — no discovery needed.
+    endpoint = {
+      baseUrl,
+      apiKey,
+      models: [{ id: process.env.PI_MODEL_ID, name: process.env.PI_MODEL_ID, contextWindow: 200000, maxTokens: 32000 }],
+    };
+  } else {
+    endpoint = await discoverFromEndpoint(baseUrl, apiKey);
+  }
   // envApiKeyAuth resolves from the environment at request time.
-  process.env.OPENAI_API_KEY = cached.apiKey;
+  process.env.OPENAI_API_KEY = endpoint.apiKey;
+  cached = { providerId, ...endpoint };
   return cached;
+}
+
+/** Provider id to register (from PI_PROVIDER_ID, default "aurora"). */
+export async function providerId(): Promise<string> {
+  return (await loadModelConfig()).providerId;
 }
 
 export async function modelId(): Promise<string> {
@@ -62,14 +89,14 @@ export async function localModels() {
   const models = createModels();
   models.setProvider(
     createProvider({
-      id: "aurora",
+      id: cfg.providerId,
       name: "Local OpenAI-compatible endpoint",
       baseUrl: cfg.baseUrl,
       auth: { apiKey: envApiKeyAuth("OpenAI-compatible API key", ["OPENAI_API_KEY"]) },
       models: cfg.models.map((m) => ({
         id: m.id,
         name: m.name,
-        provider: "aurora",
+        provider: cfg.providerId,
         baseUrl: cfg.baseUrl,
         api: "openai-completions",
         reasoning: true,

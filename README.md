@@ -64,11 +64,17 @@ artifacts land in gitignored `poc/data/` and `poc/work/`.
 
 ## Model configuration
 
-Scripts resolve the model endpoint in this order:
+The PoC wiring (`poc/lib/model.mjs`) is inference-host/model-agnostic — switching hosts is a
+`.env` change, no code edits:
 
-1. **`OPENAI_BASE_URL` + `OPENAI_API_KEY`** env vars — the served model is
-   auto-discovered via `GET /v1/models` (prefers the model currently `loaded`). This is the supported path.
-2. Fallback (local dev only): an `aurora` provider in `~/.pi/agent/models.json`.
+- **`OPENAI_BASE_URL` + `OPENAI_API_KEY`** — the endpoint; the served model is
+  auto-discovered via `GET /v1/models` (prefers the model currently `loaded`). This is the supported path.
+- **`PI_PROVIDER_ID`** (optional) — provider id registered with pi-ai (default `aurora`).
+- **`PI_MODEL_ID`** (optional) — explicit model id override (skips auto-discovery).
+- Fallback (local dev only): a provider entry in `~/.pi/agent/models.json`, keyed by the
+  provider id.
+
+`poc/lib/aurora.mjs` remains as a back-compat shim re-exporting the old names.
 
 ## Creating the Telegram bot (for `06-telegram.mjs`)
 

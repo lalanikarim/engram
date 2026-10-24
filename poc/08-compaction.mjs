@@ -7,7 +7,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fileURLToPath } from "node:url";
-import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
+import { localModels, providerId, modelId } from "./lib/model.mjs";
 import { loadDotEnv } from "./lib/env.mjs";
 loadDotEnv();
 
@@ -32,7 +32,7 @@ const h = await Harness.open(
   {
     // pi-ai always reserves 4096 tokens of headroom (CONTEXT_SAFETY_TOKENS), so the
     // window must be > prompt + 4096. 8192 leaves ~3k for output and fires compaction early.
-    models: await auroraModels({ contextWindow: 8192, maxTokens: 4096 }),
+    models: await localModels({ contextWindow: 8192, maxTokens: 4096 }),
     registry,
     env: () => new NodeExecutionEnv({ cwd: WORK }),
     settings: {
@@ -45,7 +45,7 @@ const h = await Harness.open(
 h.resume();
 
 const root = await h.root(ctx, {
-  agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "off" },
+  agent: { model: { provider: await providerId(), modelId: await modelId() }, thinkingLevel: "off" },
 });
 
 let pass = true;

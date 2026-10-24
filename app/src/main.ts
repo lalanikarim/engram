@@ -9,7 +9,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
 import { ConversationMeta } from "./meta.ts";
-import { loadModelConfig, localModels, modelId } from "./model.ts";
+import { loadModelConfig, localModels, modelId, providerId } from "./model.ts";
 import { buildRegistry, ROOT_INSTRUCTIONS } from "./registry.ts";
 import { createServer } from "./server.ts";
 import { SandboxManager } from "./sandbox.ts";
@@ -80,7 +80,7 @@ async function main() {
     console.error("[pidurable] sandbox orphan sweep failed:", (e as Error).message);
   }
 
-  const modelRef: ModelRef = { provider: "aurora", modelId: id };
+  const modelRef: ModelRef = { provider: await providerId(), modelId: id };
   const root = await harness.root(ctx, {
     agent: {
       model: modelRef,

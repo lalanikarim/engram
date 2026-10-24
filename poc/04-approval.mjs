@@ -9,7 +9,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fileURLToPath } from "node:url";
-import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
+import { localModels, providerId, modelId } from "./lib/model.mjs";
 import { ApprovalDoc, approvalHook, dangerousTool, DANGEROUS_TOOL } from "./lib/approvals.mjs";
 import { loadDotEnv } from "./lib/env.mjs";
 loadDotEnv();
@@ -36,7 +36,7 @@ registry.install(
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/approval.sqlite"),
   {
-    models: await auroraModels(),
+    models: await localModels(),
     registry,
     env: () => new NodeExecutionEnv({ cwd: WORK }),
   },
@@ -82,7 +82,7 @@ async function verifyExecuted() {
 
 if (mode === "happy") {
   const root = await h.root(ctx, {
-    agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "medium" },
+    agent: { model: { provider: await providerId(), modelId: await modelId() }, thinkingLevel: "medium" },
   });
   const sub1 = await root.submit({ type: "input", content: TASK, requestId: "ph3-appr-1" }, ctx);
   await sub1.wait(ctx);
@@ -113,7 +113,7 @@ if (mode === "happy") {
 
 if (mode === "crash") {
   const root = await h.root(ctx, {
-    agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "medium" },
+    agent: { model: { provider: await providerId(), modelId: await modelId() }, thinkingLevel: "medium" },
   });
   const sub1 = await root.submit({ type: "input", content: TASK, requestId: "ph3-appr-c" }, ctx);
   console.log("SUBMITTED");
