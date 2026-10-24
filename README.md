@@ -91,7 +91,6 @@ Scripts resolve the model endpoint in this order:
 ```
 poc/                        PoC scripts + shared libs (poc/lib/)
 app/                        The MVP agent (TS, Dockerfile, integration suite) — see app/README.md
-poc-factory/                Companion "issue → reviewed PR" factory PoC (phase 0 merged) — see poc-factory/README.md
 POC-PLAN.md                 Assumptions register (A1–A10) + pass/fail gates
 POC-FINDINGS.md             Results, assumption tracker, gotchas (doubles as progress log)
 PLAN.md                     Full MVP build plan (2 weeks)
