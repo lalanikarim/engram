@@ -30,6 +30,22 @@ import { ConversationMeta } from "./meta.ts";
 /** Name prefix for all sandbox containers; startup sweep removes orphans with this prefix. */
 export const CONTAINER_PREFIX = "pi-sbx-";
 
+/** Same cap as NodeExecutionEnv (2^31 - 1 ms). */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/** Contract (mirrors NodeExecutionEnv.resolveTimeoutMs): `timeout` is in SECONDS. */
+function resolveTimeoutMs(timeout: number | undefined): Result<number | undefined, ExecutionError> {
+  if (timeout === undefined) return ok(undefined);
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return err(new ExecutionError("timeout", "Invalid timeout: must be a finite number of seconds"));
+  }
+  const timeoutMs = timeout * 1000;
+  if (timeoutMs > MAX_TIMEOUT_MS) {
+    return err(new ExecutionError("timeout", `Invalid timeout: maximum is ${MAX_TIMEOUT_MS / 1000} seconds`));
+  }
+  return ok(timeoutMs);
+}
+
 export class PodmanSandboxEnv {
   readonly id: string;
   private workspace: string;
@@ -86,6 +102,9 @@ export class PodmanSandboxEnv {
     context: Context,
   ): Promise<Result<ShellExecResult, ExecutionError>> {
     if (!this.ready) return err(new ExecutionError("spawn_error", "sandbox not initialized"));
+    const timeoutResult = resolveTimeoutMs(options?.timeout);
+    if (!timeoutResult.ok) return timeoutResult;
+    const timeoutMs = timeoutResult.value;
     const finalArgs = ["exec", "-w", "/sandbox", this.containerId];
     // typeof (not Array.isArray): the guard must narrow `readonly string[]` out of the else branch.
     if (typeof command === "string") finalArgs.push("sh", "-lc", command);
@@ -94,11 +113,11 @@ export class PodmanSandboxEnv {
       const child = spawn("podman", finalArgs, { stdio: ["ignore", "pipe", "pipe"] });
       let timedOut = false;
       let aborted = false;
-      const timer = options?.timeout
+      const timer = timeoutMs !== undefined
         ? setTimeout(() => {
             timedOut = true;
             child.kill("SIGKILL");
-          }, options.timeout)
+          }, timeoutMs)
         : null;
       const onAbort = () => {
         aborted = true;
@@ -120,7 +139,7 @@ export class PodmanSandboxEnv {
       });
       child.on("close", (code) => {
         finish();
-        if (timedOut) resolve(err(new ExecutionError("timeout", `command timed out after ${options?.timeout}ms`)));
+        if (timedOut) resolve(err(new ExecutionError("timeout", `timeout:${options?.timeout}`)));
         else if (aborted) resolve(err(new ExecutionError("aborted", "command aborted")));
         else resolve(ok({ exitCode: code ?? 1 }));
       });

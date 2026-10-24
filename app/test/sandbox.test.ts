@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { PodmanSandboxEnv } from "../src/sandbox.ts";
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = path.resolve(APP_ROOT, "..");
@@ -187,6 +189,39 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   console.log(`sandbox suite: podman ${podmanCheck.out}, workspace ${WORKSPACE}`);
+
+  // ---- exec timeout contract (deterministic, no model needed) ----
+  // Regression for issue #14: the contract takes SECONDS (NodeExecutionEnv.resolveTimeoutMs);
+  // a port that treated it as ms would fail `timeout: 5` after ~5ms.
+  const ws = path.join(base, "timeout-ws");
+  mkdirSync(ws, { recursive: true });
+  const env = new PodmanSandboxEnv({ workspace: ws });
+  await env.init(BACKGROUND_CONTEXT);
+
+  const r1 = await env.exec("sleep 1", { timeout: 5 }, BACKGROUND_CONTEXT);
+  check(
+    "timeout in seconds honored (sleep 1, timeout 5 → ok)",
+    r1.ok && r1.value.exitCode === 0,
+    r1.ok ? undefined : `code=${r1.error.code} msg=${r1.error.message}`,
+  );
+
+  const t2 = Date.now();
+  const r2 = await env.exec("sleep 8", { timeout: 2 }, BACKGROUND_CONTEXT);
+  const elapsed2 = Date.now() - t2;
+  check(
+    "explicit timeout fires after ~N seconds (sleep 8, timeout 2)",
+    !r2.ok && r2.error.code === "timeout" && elapsed2 >= 1900 && elapsed2 < 5000,
+    `ok=${r2.ok} code=${!r2.ok ? r2.error.code : "-"} msg=${!r2.ok ? r2.error.message : "-"} elapsed=${elapsed2}ms`,
+  );
+
+  const r3 = await env.exec("echo hi", { timeout: -1 }, BACKGROUND_CONTEXT);
+  check(
+    "invalid timeout rejected per contract (timeout -1)",
+    !r3.ok && /Invalid timeout/.test(r3.error.message),
+    `ok=${r3.ok} msg=${!r3.ok ? r3.error.message : "-"}`,
+  );
+
+  await env.cleanup(BACKGROUND_CONTEXT);
 
   proc = spawnServer();
   if (!(await waitReady(proc!))) throw new Error("server did not become ready");
