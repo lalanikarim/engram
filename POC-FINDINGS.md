@@ -379,9 +379,7 @@ concrete model id string. Switching inference host required source edits.
   `PI_MODEL_ID` (explicit override, skips discovery), existing `OPENAI_*` unchanged.
   Exports `loadModelConfig()` / `providerId()` / `modelId()` / `localModel()` /
   `localModels(overrides)`. models.json fallback now keyed by provider id.
-- The former `poc/lib/aurora.mjs` was removed outright (no back-compat shim). Cross-repo
-  consumers (SoftwareFactory factory PoC) must migrate their imports to `poc/lib/model.mjs`
-  and the new export names.
+- The former `poc/lib/aurora.mjs` was removed outright (no back-compat shim).
 - All 10 PoC scripts + `lib/worker.mjs` migrated; worker's delegate tool now resolves the model
   id from config instead of a hardcoded literal.
 - **App side** (`src/model.ts`, `src/main.ts`) got the same env-driven provider id, keeping both
@@ -396,12 +394,6 @@ Verification (all acceptance criteria from the issue):
   (env-only switch). Note: pi-ai streams by default — non-streaming mocks must answer with SSE.
 - `PI_MODEL_ID` override verified (skips discovery).
 - App: `tsc --noEmit` clean, api suite 48/48.
-
-### Parallel work merged since (2026-10-23)
-
-- **Factory PoC phase 0** (PR #3): webhook intake adapter + G0 exactly-once gate (8/8 checks)
-  for the companion "issue → reviewed PR" project. The `poc-factory/` tree was removed from
-  this repo on 2026-10-24 (PR #11) — that work is preserved in a separate repository.
 
 ### Not yet done
 

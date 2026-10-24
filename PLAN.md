@@ -150,3 +150,34 @@ hardening & security-checklist pass are all merged (see the progress log at the 
 `POC-FINDINGS.md`). Remaining: post-MVP follow-up — §5 item 7 container packaging (unprivileged
 agent container, engine socket kept out, scoped podman wrapper in a 2-service compose,
 host firewall rules).
+
+## 9. Post-MVP direction — open decisions (2026-10-24)
+
+The MVP is complete and verified; what comes next is a strategic fork, not a continuation.
+Three directions:
+
+**A. Make it operational** — run it daily: start a live instance (Web UI on LAN + Telegram),
+disable sleep on the home-server box (PLAN §7 decision 4). §5 item 7 packaging is only urgent if
+the agent will be exposed beyond trusted-LAN.
+
+**B. Expand capability** — PLAN §6 roadmap, ranked by leverage for a *single-user project brain*:
+
+| Option | Leverage |
+|---|---|
+| **Scheduled checks** (cron → durable submit → Telegram result) | Biggest "brain" upgrade: turns it from reactive to proactive. Low–med effort; reuses durable submit, Telegram, approvals |
+| **MCP bridge** | Makes the brain drivable by other agents (pi, herdr workers) — a shared substrate, not a siloed bot. High leverage for multi-agent setups |
+| **KB v2** (local embeddings + vector search over `/kb`) | Makes memory real; today `kb_search` is ripgrep (works, crude) |
+| **Dynamic spawning** (conversation + sandbox per ticket on demand) | Scale-out endgame: on-demand isolated project conversations |
+| Email client / Dashboards / Browser automation | Useful but narrower or read-only |
+
+**Working recommendation:** if the goal is a *daily personal driver*, do **A (live instance +
+sleep-disable) → B: scheduled checks** first (shortest path from verified MVP to proactively
+useful, reuses almost everything built). If the goal is a *multi-agent substrate*, lead with the
+**MCP bridge**. If the goal is *real memory/knowledge*, lead with **KB v2**.
+
+**Open questions that decide the plan:**
+1. What's the end goal — daily personal driver, multi-agent substrate, or a specific use case?
+2. Where will it run long-term — this Mac, a dedicated home-server box, exposed beyond LAN? (Decides whether item 7 + sleep-disable are now or later.)
+3. Is it time to run it live, or is this still build-phase?
+
+*Decision log: record the answers here when resolved.*
