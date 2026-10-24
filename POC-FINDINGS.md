@@ -342,12 +342,41 @@ Orphaned containers from crashed runs are swept at startup. `POST /conversations
   `poc/lib/podman-sandbox.mjs` (validate finite > 0 with the same cap, convert to ms,
   report seconds), with three deterministic regression checks added to the suite (now 16/16).
 
+### Week 2 — D14 hardening & security pass ✅ COMPLETE (2026-10-24, `feature/d14-hardening`)
+
+New suite `app/test/hardening.test.ts` — **13/13 checks** (live model + Podman):
+
+- **A. Injection probe through the real server:** a fetched page with embedded
+  "ignore previous instructions" + canary phrase. Verified: answer grounded in the page,
+  zero hits on an attacker exfil listener, injected `send_message` never executed (gated),
+  and no bash exfil attempt at all — even failed ones are flagged via tool-result inspection.
+- **B. Sandbox crash test** (acceptance criterion #1 extended to sandboxed conversations):
+  SIGKILL mid-run inside a live sandbox container → restart over the same data dir → orphan
+  container swept at startup → run resumed from checkpoint, settled, final answer grounded in
+  the task, and the post-restart container disposed when that run ended.
+- Crash-resume + double-submit for the core API were already covered by the Week 1 hardening
+  suite (48/48); version pins and README currency verified current.
+
+**§5 security-model checklist pass:**
+
+| # | Requirement | Status |
+|---|---|---|
+| 1 | LAN-only, no public inbound; Telegram outbound long polling; API bearer-token | ✅ default `HOST=127.0.0.1`; token required on every data route; verified in suites |
+| 2 | Untrusted input as delimited data; researcher role shell-less/write-less | ✅ `<untrusted>` wrapping (web_fetch + HTTP tools); researcher = web_fetch+kb_search only; injection probe re-verified live (A above) |
+| 3 | Generated code only in sandbox; no host secrets, minimal egress, guarded workspace; main shell scoped to /work | ✅ sandbox isolation verified (16/16 suite). **Scope note:** non-sandboxed conversations run the agent's own tools with host-level permissions (cwd-scoped, not hard-contained) — untrusted code work belongs in `sandbox: true` conversations |
+| 4 | Approval gates as control boundary; no self-approve; decisions crash-durable | ✅ hook + canonicalized keys + idempotent endpoint; crash/double-tap races covered by suites; injection probe confirms gated tool never self-executed |
+| 5 | Secrets in env only, never in transcripts/docs; sandbox gets none | ✅ `.env` gitignored; no code path writes secrets to entries; container env scan verified empty (sandbox suite) |
+| 6 | Pinned deps; allow-listed config tools | ✅ exact pins in package-lock; `tools.json` validated (http(s) only, declared params) |
+| 7 | Unprivileged agent container, no engine socket, scoped podman wrapper, box firewall | ⚠️ **partially met — post-MVP follow-up.** Current Dockerfile runs as root and has no podman client, so sandboxing is unavailable in that deployment (native run works). `SandboxManager` is the scoping layer (fixed name prefix, one configured image, fixed mount/network pattern); remaining: unprivileged user, 2-service compose with engine access outside the agent container, host firewall rules |
+
 ### Parallel work merged since (2026-10-23)
 
 - **Factory PoC phase 0** (PR #3): webhook intake adapter + G0 exactly-once gate (8/8 checks)
   for the companion "issue → reviewed PR" project. The `poc-factory/` tree was removed from
   this repo on 2026-10-24 (PR #11) — that work is preserved in a separate repository.
 
-### Not yet done (Week 2 per PLAN §4)
+### Not yet done
 
-D14 security-checklist pass.
+Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
+container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
+host firewall rules). Everything else in PLAN §4 is complete.

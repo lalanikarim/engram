@@ -39,9 +39,14 @@ node test/webui.test.ts   # 14 Playwright e2e checks (needs a local Playwright i
                           # not a repo dependency): token gate, live-streamed answers,
                           # steering, approvals panel + exactly-once execution, new conversations
 
-node test/sandbox.test.ts # 13 checks (needs Podman + the sandbox image): container isolation
-                          # (no host secrets, egress blocked, host FS not mounted), workspace
-                          # mount, containment guard, per-task disposal + respawn
+node test/sandbox.test.ts   # 16 checks (needs Podman + the sandbox image): exec timeout
+                          # contract, container isolation (no host secrets, egress blocked,
+                          # host FS not mounted), workspace mount, containment guard,
+                          # per-task disposal + respawn
+
+node test/hardening.test.ts # 13 checks (D14; part B needs Podman): prompt-injection probe
+                          # through the real server (no exfil, no executed injected action),
+                          # SIGKILL mid-run in a sandboxed conversation → orphan sweep → resume
 ```
 
 ## Web UI
