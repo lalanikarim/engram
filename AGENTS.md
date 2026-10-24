@@ -3,10 +3,10 @@
 ## What this is
 
 A durable, local-model "project brain" agent on **pi-durable**. The PoC validated the
-foundation (all gates passed — see `POC-FINDINGS.md`); the 2-week MVP per `PLAN.md` is in
-progress. **MVP Week 1 (core) + durability hardening + Telegram client (D8–9) + Web UI
-(D10–11) are done** — see the progress log at the bottom of `POC-FINDINGS.md`. Remaining
-Week 2: sandbox sidecar (D12–13), D14 security pass.
+foundation (all gates passed — see `POC-FINDINGS.md`), and the 2-week MVP per `PLAN.md` is
+**complete**: Week 1 core + durability hardening, Telegram client (D8–9), Web UI (D10–11),
+sandbox sidecar (D12–13), and the D14 hardening & security pass — see the progress log at
+the bottom of `POC-FINDINGS.md`. Remaining post-MVP: §5 item 7 container packaging.
 
 ## Repo layout
 
