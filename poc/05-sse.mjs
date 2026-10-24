@@ -10,7 +10,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fileURLToPath } from "node:url";
 import http from "node:http";
-import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
+import { localModels, providerId, modelId } from "./lib/model.mjs";
 import { loadDotEnv } from "./lib/env.mjs";
 loadDotEnv();
 
@@ -24,12 +24,12 @@ registry.install(CodingTools);
 
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/sse.sqlite"),
-  { models: await auroraModels(), registry, env: () => new NodeExecutionEnv({ cwd: WORK }) },
+  { models: await localModels(), registry, env: () => new NodeExecutionEnv({ cwd: WORK }) },
   ctx,
 );
 h.resume();
 const root = await h.root(ctx, {
-  agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "medium" },
+  agent: { model: { provider: await providerId(), modelId: await modelId() }, thinkingLevel: "medium" },
 });
 
 function authorized(req) {

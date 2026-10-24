@@ -7,7 +7,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fileURLToPath } from "node:url";
-import { auroraModels, auroraModelId } from "./lib/aurora.mjs";
+import { localModels, providerId, modelId } from "./lib/model.mjs";
 import { loadDotEnv } from "./lib/env.mjs";
 loadDotEnv();
 
@@ -20,7 +20,7 @@ registry.install(CodingTools);
 const h = await Harness.open(
   await openNodeSqliteStorage("./data/compaction-bg.sqlite"),
   {
-    models: await auroraModels({ contextWindow: 8192, maxTokens: 4096 }),
+    models: await localModels({ contextWindow: 8192, maxTokens: 4096 }),
     registry,
     env: () => new NodeExecutionEnv({ cwd: WORK }),
     // reserveTokens must exceed pi-ai's fixed 4096-token safety margin, otherwise
@@ -34,7 +34,7 @@ const h = await Harness.open(
 h.resume();
 
 const root = await h.root(ctx, {
-  agent: { model: { provider: "aurora", modelId: await auroraModelId() }, thinkingLevel: "off" },
+  agent: { model: { provider: await providerId(), modelId: await modelId() }, thinkingLevel: "off" },
 });
 
 let pass = true;

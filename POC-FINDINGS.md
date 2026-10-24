@@ -369,6 +369,34 @@ New suite `app/test/hardening.test.ts` — **13/13 checks** (live model + Podman
 | 6 | Pinned deps; allow-listed config tools | ✅ exact pins in package-lock; `tools.json` validated (http(s) only, declared params) |
 | 7 | Unprivileged agent container, no engine socket, scoped podman wrapper, box firewall | ⚠️ **partially met — post-MVP follow-up.** Current Dockerfile runs as root and has no podman client, so sandboxing is unavailable in that deployment (native run works). `SandboxManager` is the scoping layer (fixed name prefix, one configured image, fixed mount/network pattern); remaining: unprivileged user, 2-service compose with engine access outside the agent container, host firewall rules |
 
+### Model wiring made host/model-agnostic ✅ COMPLETE (2026-10-24, `fix/model-provider-agnostic`, issue #17)
+
+The PoC (and app) model wiring hardcoded provider id `"aurora"` in the provider definition and
+in every conversation/agent config (~16 sites across 12 files); `lib/worker.mjs` also pinned a
+concrete model id string. Switching inference host required source edits.
+
+- **New `poc/lib/model.mjs`** — env-driven identity: `PI_PROVIDER_ID` (default `aurora`),
+  `PI_MODEL_ID` (explicit override, skips discovery), existing `OPENAI_*` unchanged.
+  Exports `loadModelConfig()` / `providerId()` / `modelId()` / `localModel()` /
+  `localModels(overrides)`. models.json fallback now keyed by provider id.
+- The former `poc/lib/aurora.mjs` was removed outright (no back-compat shim). Cross-repo
+  consumers (SoftwareFactory factory PoC) must migrate their imports to `poc/lib/model.mjs`
+  and the new export names.
+- All 10 PoC scripts + `lib/worker.mjs` migrated; worker's delegate tool now resolves the model
+  id from config instead of a hardcoded literal.
+- **App side** (`src/model.ts`, `src/main.ts`) got the same env-driven provider id, keeping both
+  layers consistent.
+- Both `.env.example` files document the new optional vars; README "Model configuration" updated.
+
+Verification (all acceptance criteria from the issue):
+- Back-compat: with no new env vars, resolution is unchanged (`aurora` + auto-discovered Qwen
+  model); `01-core.mjs t3` ran fresh against Aurora end-to-end (status=done).
+- Host-agnostic: a mock OpenAI-compatible endpoint on localhost + `PI_PROVIDER_ID=mocktest` →
+  config resolved from env only and a minimal harness round-trip completed against the mock host
+  (env-only switch). Note: pi-ai streams by default — non-streaming mocks must answer with SSE.
+- `PI_MODEL_ID` override verified (skips discovery).
+- App: `tsc --noEmit` clean, api suite 48/48.
+
 ### Parallel work merged since (2026-10-23)
 
 - **Factory PoC phase 0** (PR #3): webhook intake adapter + G0 exactly-once gate (8/8 checks)
