@@ -9,6 +9,9 @@
 //   GET  /approvals               pending approval requests (discovered from transcript markers)
 //   POST /approvals/:key          {decision: "approved"|"denied"} → durable decision
 import http from "node:http";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, ConversationId, EntryRecord, EntryId, Harness, ModelRef } from "@earendil-works/pi-durable";
@@ -19,6 +22,33 @@ import { ConversationMeta } from "./meta.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const MAX_BODY_BYTES = 1_000_000;
+
+// Public static assets for the Web UI (PLAN §4 D10–11). Only exact paths are served —
+// no user-controlled path segments. All data routes remain bearer-authenticated.
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WEB_ROOT = path.join(APP_ROOT, "web");
+const VENDOR_FILES: Record<string, { file: string; type: string }> = {
+  "/vendor/preact.mjs": { file: "node_modules/preact/dist/preact.mjs", type: "text/javascript" },
+  "/vendor/hooks.mjs": { file: "node_modules/preact/hooks/dist/hooks.mjs", type: "text/javascript" },
+  "/vendor/htm.mjs": { file: "node_modules/htm/dist/htm.mjs", type: "text/javascript" },
+  "/vendor/htm-preact.mjs": { file: "node_modules/htm/preact/index.mjs", type: "text/javascript" },
+};
+
+function serveStatic(pathname: string): { data: Buffer; type: string } | null {
+  try {
+    if (pathname === "/" || pathname === "/index.html") {
+      return { data: readFileSync(path.join(WEB_ROOT, "index.html")), type: "text/html; charset=utf-8" };
+    }
+    if (pathname === "/app.js") {
+      return { data: readFileSync(path.join(WEB_ROOT, "app.js")), type: "text/javascript" };
+    }
+    const v = VENDOR_FILES[pathname];
+    if (v) return { data: readFileSync(path.join(APP_ROOT, v.file)), type: v.type };
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 // IDs are branded at the type level but plain numbers at runtime.
 const cid = (n: number): ConversationId => n as ConversationId;
@@ -105,6 +135,15 @@ export function createServer(deps: ServerDeps): http.Server {
 
   const server = http.createServer(async (req, res) => {
     try {
+      // Public UI bootstrap assets (no auth); the data plane below stays token-gated.
+      if (req.method === "GET") {
+        const staticFile = serveStatic(new URL(req.url ?? "/", "http://localhost").pathname);
+        if (staticFile) {
+          res.writeHead(200, { "content-type": staticFile.type });
+          res.end(staticFile.data);
+          return;
+        }
+      }
       if (!authorized(req, config.token)) {
         sendJson(res, 401, { error: "unauthorized" });
         return;

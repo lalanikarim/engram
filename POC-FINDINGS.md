@@ -289,6 +289,29 @@ Bot-API redeliveries exactly-once.
   (`constructor(private x: T)`) — use explicit field declarations. `tsc --noEmit` does not
   catch this; only running under Node does.
 
+### Week 2 — Web UI ✅ COMPLETE (2026-10-24, `feature/web-ui`)
+
+Single-page app (`app/web/`, served by the API server): Preact + htm from `node_modules`
+via import map — no build step. Token gate (token in localStorage; static assets public,
+data plane stays bearer-token gated), conversation list + creation, full transcript view,
+live streaming via a fetch-based SSE reader (EventSource can't send Authorization headers;
+cursor-based reconnect resumes where it left off), steering a running turn, and the
+pending-approvals panel (Approve/Deny → idempotent `POST /approvals/:key`). Full entry
+content always comes from `GET /conversations/:id/entries` — SSE events are change
+notifications only.
+
+- **14/14 checks** (`app/test/webui.test.ts`, Playwright e2e against a real server):
+  token gate, live-streamed answer, steering (badge + steered final answer + tool output),
+  approvals panel (request → approve → result rendered → executed exactly once → panel
+  clears), new conversation flow. Re-ran the other suites after all server changes:
+  **api 48/48, telegram 18/18** — all green.
+- Preact bumped 10.28.0 → 10.29.8 (patch-level; includes rerender-queue/DOM-pointer
+  fixes). Both suites verified on the new version.
+- Test-harness gotcha worth remembering: `Node.isConnected` is the real DOM property —
+  `el.connected` is always undefined and silently made every "detached DOM" probe report
+  false negatives. A long debugging detour was caused by checking the wrong property;
+  the app itself had been rendering correctly all along.
+
 ### Parallel work merged since (2026-10-23)
 
 - **Factory PoC phase 0** (`poc-factory/`, PR #3): webhook intake adapter + G0 exactly-once gate
@@ -297,4 +320,4 @@ Bot-API redeliveries exactly-once.
 
 ### Not yet done (Week 2 per PLAN §4)
 
-Web UI, sandbox sidecar execution env, and the D14 security-checklist pass.
+Sandbox sidecar execution env, and the D14 security-checklist pass.
