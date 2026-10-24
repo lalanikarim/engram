@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PiDurable — project brain</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161a22; --panel2: #1c212c; --border: #2a3140;
+    --text: #d7dde8; --dim: #8b93a5; --accent: #5b9dff; --ok: #3fb96f; --err: #e05d5d;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+  #root { height: 100vh; display: flex; flex-direction: column; }
+
+  /* token screen */
+  .token-screen { margin: auto; max-width: 380px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 24px; text-align: center; }
+  .token-screen h1 { font-size: 18px; margin: 0 0 6px; }
+  .token-screen p { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+  .token-screen input { width: 100%; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-family: var(--mono); }
+
+  /* layout */
+  .layout { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+  aside { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .side-head { padding: 12px 14px; font-weight: 600; font-size: 13px; color: var(--dim); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+  .conv-list { overflow-y: auto; flex: 1; padding: 6px; }
+  .conv { padding: 8px 10px; border-radius: 7px; cursor: pointer; margin-bottom: 2px; }
+  .conv:hover { background: var(--panel2); }
+  .conv.active { background: var(--panel2); outline: 1px solid var(--border); }
+  .conv .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv .meta { font-size: 11px; color: var(--dim); display: flex; gap: 8px; margin-top: 2px; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: rgba(91,157,255,.15); color: var(--accent); }
+  .badge.run { background: rgba(63,185,111,.15); color: var(--ok); }
+  .new-conv { padding: 10px; border-top: 1px solid var(--border); display: grid; gap: 6px; }
+  .new-conv input { width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px; }
+  .btn { padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.small { padding: 4px 9px; font-size: 12px; }
+  .btn.approve { color: var(--ok); }
+  .btn.deny { color: var(--err); }
+
+  /* chat */
+  main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .chat-head { padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); display: flex; align-items: center; gap: 10px; }
+  .chat-head .title { font-weight: 600; font-size: 14px; }
+  .chat-head .cwd { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 78%; border-radius: 9px; padding: 8px 12px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: rgba(91,157,255,.16); }
+  .msg.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
+  .msg .who { font-size: 11px; color: var(--dim); margin-bottom: 3px; }
+  .toolcall { align-self: flex-start; font-family: var(--mono); font-size: 12px; color: var(--dim); background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px; max-width: 85%; }
+  .toolresult { align-self: flex-start; font-family: var(--mono); font-size: 12px; background: var(--panel2); border: 1px solid var(--border); border-left: 3px solid var(--ok); border-radius: 7px; padding: 6px 9px; max-width: 85%; white-space: pre-wrap; word-break: break-word; }
+  .toolresult.err { border-left-color: var(--err); }
+  .toolresult .tr-head { color: var(--dim); font-size: 11px; margin-bottom: 3px; }
+  .toolresult .tr-body { max-height: 220px; overflow-y: auto; }
+  .empty { margin: auto; color: var(--dim); text-align: center; }
+
+  /* approvals banner */
+  .approvals { border-bottom: 1px solid var(--border); background: rgba(224,93,93,.07); padding: 8px 16px; display: grid; gap: 6px; }
+  .approval { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .approval .a-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+  .approval .a-key { color: var(--dim); font-size: 11px; }
+
+  /* composer */
+  .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel); }
+  .composer input { flex: 1; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }
+  .hint { font-size: 11px; color: var(--dim); padding: 0 16px 8px; background: var(--panel); text-align: right; }
+</style>
+<script type="importmap">
+{ "imports": { "preact": "/vendor/preact.mjs", "preact/hooks": "/vendor/hooks.mjs", "htm": "/vendor/htm.mjs" } }
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

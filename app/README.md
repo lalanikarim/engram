@@ -31,7 +31,19 @@ npm test                  # two live-model suites against a real server over tem
 #                         SIGKILL mid-run recovery, pending-approval-across-crash, double-submit races
 #   test/telegram.test.ts 18 checks: binding, task→progress→answer, access control,
 #                         inline approval button → callback → settle → retry, topic→fork, state file
+
+node test/webui.test.ts   # 14 Playwright e2e checks (needs a local Playwright install —
+                          # not a repo dependency): token gate, live-streamed answers,
+                          # steering, approvals panel + exactly-once execution, new conversations
 ```
+
+## Web UI
+
+Open `http://HOST:PORT/` — a single-page app (Preact + htm, served from `node_modules`,
+no build step) with a token gate. Static assets are public; every data route keeps its
+bearer-token requirement. It supports: conversation list + creation, full transcript view,
+live streaming via SSE (cursor-based reconnect), steering a running turn, and the
+pending-approvals panel (Approve/Deny → 409-safe idempotent decisions).
 
 ## API (all routes require `Authorization: Bearer <API_TOKEN>`)
 
