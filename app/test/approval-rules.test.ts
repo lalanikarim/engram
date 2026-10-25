@@ -1,6 +1,6 @@
 // Unit tests for persistent allow-rules (src/extensions/approvals.ts) — no live model needed.
 // Run with: node test/approval-rules.test.ts
-import { defaultRuleMatch, ruleIdFor, ruleMatches, type ApprovalRule } from "../src/extensions/approvals.ts";
+import { defaultRuleMatch, isApprovalExpired, ruleIdFor, ruleMatches, type ApprovalRule } from "../src/extensions/approvals.ts";
 
 let passed = 0;
 let failed = 0;
@@ -45,6 +45,13 @@ check(
     '{"target":"staging","count":"2","flag":"true"}',
 );
 check("no scalar args → empty match (exact-action rule)", JSON.stringify(defaultRuleMatch("x", {})) === "{}");
+
+console.log("ttl expiry");
+const now = 1_000_000;
+check("expired past ttl", isApprovalExpired(now - 10_001, now, 10_000));
+check("not expired exactly at ttl", !isApprovalExpired(now - 10_000, now, 10_000));
+check("unknown pendingSince never expires", !isApprovalExpired(undefined, now, 0));
+check("zero ttl expires any known age", isApprovalExpired(now - 1, now, 0) && !isApprovalExpired(now, now, 0));
 
 console.log("rule id stability");
 const a = ruleIdFor("send_message", { to: "bob" });
