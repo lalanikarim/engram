@@ -291,6 +291,10 @@ Design-level sketch for the M1 board — what's new vs. reused, the doc families
 claim state machine, and the member lifecycle. Not a final spec; exact delivery mechanics marked
 *confirm at build*.
 
+> **Core mechanics validated** by spike [`poc/11-board.mjs`](../../poc/11-board.mjs) (two standing
+> members; atomic single-winner claim + member work loop both PASS on Qwen3.8-27B, 2026-10-25).
+> Build plan: [`docs/plans/project-0-board.md`](../plans/project-0-board.md).
+
 ### New vs. reused
 - **Reused (already built):** harness over SQLite + `resume()`; conversations with per-conversation
   agent config (model/tools/cwd/instructions); `submit` (exactly-once via `requestId`);
