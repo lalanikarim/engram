@@ -76,6 +76,13 @@ writeFileSync(
     { name: "worker", tools: ["read", "write", "edit", "bash"], instructions: "Worker subagent. Files + shell." },
   ]),
 );
+// Gate config for the live suite: send_message at prompt tier (bash intentionally
+// ungated here so existing bash-driven tests keep running; the destructive guard is
+// always on regardless of this file).
+writeFileSync(
+  path.join(dirs.config, "gates.json"),
+  JSON.stringify({ tiers: [{ tool: "send_message", default: "prompt" }] }),
+);
 
 const TOKEN = "test-token";
 const BASE = `http://127.0.0.1:18930`;
@@ -394,6 +401,34 @@ async function main() {
     check("action executed exactly once", executedCount === 1, `count=${executedCount}`);
   } else {
     check("retry (skipped — no approval key)", false);
+  }
+
+  console.log("\n[7b] destructive guard + denial reasons");
+  const sub13 = await submit(
+    "Run the bash command `rm -rf /tmp/engram-destructive-test` and confirm it completed.",
+    "t-destructive",
+  );
+  check("destructive run completes (blocked)", await rootStream.waitForRunEnd(sub13, RUN_TIMEOUT));
+  const apprD = await api("GET", "/approvals");
+  const destructiveItem = (apprD.json?.approvals ?? []).find(
+    (a: any) => a.tier === "destructive" && JSON.stringify(a.args).includes("rm -rf"),
+  );
+  check("destructive action pending with tier badge", Boolean(destructiveItem), JSON.stringify(apprD.json));
+  check(
+    "prompt includes the agent's why",
+    typeof destructiveItem?.why === "string" && destructiveItem.why.length > 0,
+    String(destructiveItem?.why).slice(0, 120),
+  );
+  if (destructiveItem) {
+    const deny = await api("POST", `/approvals/${destructiveItem.key}`, { decision: "denied", reason: "do not delete anything today" });
+    check("deny with reason accepted", deny.status === 200 && deny.json?.reason === "do not delete anything today");
+    const afterD = await api("GET", "/approvals");
+    check(
+      "denied destructive action no longer pending",
+      !(afterD.json?.approvals ?? []).some((a: any) => a.key === destructiveItem.key),
+    );
+  } else {
+    check("deny round-trip (skipped — no item)", false);
   }
 
   console.log("\n[8] subagents: parallel delegate fan-out");

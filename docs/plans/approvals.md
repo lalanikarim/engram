@@ -1,6 +1,6 @@
 # Smarter approvals — risk tiers, persistent rules, destructive guard
 
-Status: **planned** (2026-10-25). Decisions recorded from discussion with the owner.
+Status: **phase 1 implemented** (2026-10-25); phases 2–4 pending. Decisions recorded from discussion with the owner.
 
 ## Current state (what works, what's dumb)
 
@@ -112,10 +112,10 @@ Patterns are deliberately conservative — when in doubt, prompt.
 
 ## Phases & acceptance
 
-| Phase | Scope | Acceptance |
-|---|---|---|
-| 1 | Tiers + destructive guard (A) + rich prompts & denial reasons (E) | safe `bash` command runs without prompt; `rm -rf` blocked with destructive UI even if an allow-rule exists for that tool; denial reason reaches the agent's next turn |
-| 2 | Persistent rules (B) | "Always allow" on a `send_message` → identical-recipient sends pass silently thereafter; rule listed/deleted via API; destructive call never auto-passes |
+| Phase | Scope | Acceptance | Status |
+|---|---|---|---|
+| 1 | Tiers + destructive guard (A) + rich prompts & denial reasons (E) | safe `bash` command runs without prompt; `rm -rf` blocked with destructive UI even if an allow-rule exists for that tool; denial reason reaches the agent's next turn | ✅ done — gates unit suite 19/19; live api suite 63/63 incl. `[7b]` (destructive block + tier badge + why + denial reason round-trip) |
+| 2 | Persistent rules (B) | "Always allow" on a `send_message` → identical-recipient sends pass silently thereafter; rule listed/deleted via API; destructive call never auto-passes | pending |
 | 3 | TTL (D) | pending approval past 24 h auto-denies durably and disappears from `/approvals`; agent notified |
 | 4 | Batching (C) | grouped prompt for N pending; "approve all" records N distinct durable decisions |
 

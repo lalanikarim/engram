@@ -10,11 +10,14 @@ import { createHash } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDocFamily, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
+import { evaluateGate, type CompiledGates, type GateTier } from "./gates.ts";
 
 export type ApprovalState = {
   decision: "pending" | "approved" | "denied";
   decidedBy: string | null;
   decidedAt: number | null;
+  /** Human-supplied reason (usually for denials), fed back to the agent. */
+  reason?: string | null;
 };
 
 export const ApprovalDoc = defineDocFamily<ApprovalState, JsonValue>({
@@ -25,7 +28,13 @@ export const ApprovalDoc = defineDocFamily<ApprovalState, JsonValue>({
   initial: () => ({ decision: "pending", decidedBy: null, decidedAt: null }),
 });
 
-export type ApprovalRequest = { key: string; tool: string; args: Record<string, unknown> };
+export type ApprovalRequest = {
+  key: string;
+  tool: string;
+  args: Record<string, unknown>;
+  /** Risk tier that produced this request ("prompt" | "destructive"). Absent on pre-tier markers. */
+  tier?: GateTier;
+};
 
 /** Canonical JSON: object keys sorted recursively, so logically identical args serialize identically. */
 function canonicalize(value: unknown): unknown {
@@ -93,18 +102,23 @@ export function parseApprovalMarker(text: string): ApprovalRequest | undefined {
   return undefined;
 }
 
-export function approvalHook(gatedTools: string[]) {
-  const gated = new Set(gatedTools);
+export function approvalHook(gates: CompiledGates) {
   return hook(ToolTask, {
     beforeTool: async (call, api, ctx) => {
-      if (!gated.has(call.name)) return undefined;
+      const tier = evaluateGate(gates, call.name, call.arguments);
+      if (tier === null || tier === "auto") return undefined; // ungated or auto-approved
       const key = approvalKeyFor(call.name, call.arguments);
       const rec = await api.snapshot(ApprovalDoc, key, ctx);
       if (rec?.decision === "approved") return undefined; // allow
-      const marker = approvalMarker({ key, tool: call.name, args: call.arguments ?? {} });
+      const marker = approvalMarker({ key, tool: call.name, args: call.arguments ?? {}, tier });
+      const warning =
+        tier === "destructive"
+          ? "This action was classified DESTRUCTIVE. It will run only if the user explicitly acknowledges the risk.\n"
+          : "";
       return {
         block:
           `BLOCKED: "${call.name}" requires human approval before it can run.\n` +
+          warning +
           `${marker}\n` +
           "Do not retry this action until the user has approved it. Tell the user that this action needs their " +
           "explicit approval (they can approve via the client, or by telling you — you cannot self-approve).",
@@ -112,6 +126,7 @@ export function approvalHook(gatedTools: string[]) {
     },
   });
 }
+
 
 /**
  * Demo gated tool: simulates an outgoing send (the first external side effect; real email/Telegram
