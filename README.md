@@ -74,6 +74,23 @@ The PoC wiring (`poc/lib/model.mjs`) is inference-host/model-agnostic — switch
 - Fallback (local dev only): a provider entry in `~/.pi/agent/models.json`, keyed by the
   provider id.
 
+### App model catalog (`app/src/model.ts`)
+
+The app supports all pi providers plus custom models, reusing the global pi config as the
+single source of truth (spec: [`docs/plans/model-catalog.md`](docs/plans/model-catalog.md)):
+
+- Built-in pi providers (opencode-go, openrouter, …) are always registered; credentials come
+  from `~/.pi/agent/auth.json` — no key duplication in `app/.env`.
+- Custom providers come from `~/.pi/agent/models.json` (e.g. the local Unsloth hosts).
+- `PI_AGENT_DIR` (default `~/.pi/agent`) overrides the config dir for tests/containers.
+- **`DEFAULT_MODEL=<provider>:<modelId>`** — global default model (first-colon split; model
+  ids may contain `/`). Unset → falls back to the loaded model on the local endpoint.
+- Per-conversation ("project") model: `POST /conversations {model}`, durable
+  `PATCH /conversations/:id {model}` (`null` resets to the default), listed in
+  `GET /conversations`; `GET /models` shows the full catalog; Telegram `/model [ref]`.
+- Subagent roles may declare their own `model` in `app/roles.json` (else they inherit the
+  parent conversation's model, then the global default).
+
 ## Creating the Telegram bot (for `06-telegram.mjs`)
 
 1. In Telegram, message **@BotFather** and send `/newbot`.

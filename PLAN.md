@@ -181,3 +181,14 @@ useful, reuses almost everything built). If the goal is a *multi-agent substrate
 3. Is it time to run it live, or is this still build-phase?
 
 *Decision log: record the answers here when resolved.*
+
+### Decision log (2026-10-25)
+
+- **Multi-provider model support** (branch `feature/model-catalog`, spec in
+  `docs/plans/model-catalog.md`): the app registers all pi-supported providers plus custom
+  models from the global pi config (`~/.pi/agent/models.json` + `auth.json`) — no key
+  duplication. Model refs are `<provider>:<modelId>` (first-colon split). The global default is
+  operator-configured via `DEFAULT_MODEL` (no provider preferred out of the box); each
+  conversation can durably pin its own model (API `PATCH`, Telegram `/model`). This deliberately
+  relaxes §1 "local models only / no cloud spend": hosted providers (e.g. opencode-go) are
+  available per operator choice, and local hosts remain the default fallback.

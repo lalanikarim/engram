@@ -3,6 +3,7 @@
 import { createRegistry, defineExtension } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { AppConfig } from "./config.ts";
+import type { ModelsConfig } from "./model.ts";
 import { approvalHook, sendMessageTool } from "./extensions/approvals.ts";
 import { httpToolExtension } from "./extensions/http-tools.ts";
 import { kbSearchTool } from "./extensions/kb-search.ts";
@@ -20,7 +21,7 @@ Working rules:
 - Verify multi-step work by actually running it (bash) before reporting success.
 - Be concise.`;
 
-export function buildRegistry(config: AppConfig, modelId: string) {
+export function buildRegistry(config: AppConfig, modelsConfig: ModelsConfig) {
   const registry = createRegistry();
   registry.install(CodingTools); // scoped per conversation via the harness env cwd
   registry.install(defineExtension({ name: "web", tools: [webFetchTool()] }));
@@ -32,7 +33,7 @@ export function buildRegistry(config: AppConfig, modelId: string) {
       hooks: [approvalHook(config.gatedTools)], // gates any selected extension's calls to gated tool names
     }),
   );
-  registry.install(subagentExtension(config.roles, modelId));
+  registry.install(subagentExtension(config.roles, modelsConfig));
   if (config.httpTools.length > 0) {
     registry.install(httpToolExtension(config.httpTools));
   }
