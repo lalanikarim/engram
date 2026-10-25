@@ -440,4 +440,5 @@ switch/reset/400s), telegram 24/24 (incl. the T6 picker flow), `tsc --noEmit` cl
 Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
 container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
 host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
-Everything else in PLAN §4 is complete.
+Next planned work: smarter approvals (`docs/plans/approvals.md` — risk tiers + destructive
+guard first). Everything else in PLAN §4 is complete.
