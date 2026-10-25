@@ -83,6 +83,56 @@ in-harness; extract to a process when isolation demands it. The one decision tha
 
 ---
 
+## Member model — in-harness vs separate instances
+
+The board's technical shape hinges on what a *member* is. Two options:
+
+**M1 — In-harness members.** One process, one storage. Members = named *standing* conversations
+(not ephemeral subagents), each with its own agent config (model, tools, cwd/workspace,
+instructions). The board = root coordinator conversation + registry/job/knowledge doc families in
+that single storage. Members coordinate via shared state; DMs/forums are shared conversations.
+
+**M2 — Separate instances.** Each member = its own engram instance (own process/storage/model/
+workspace, possibly own box). The board = a central broker process (itself an engram) owning the
+coordination store; members connect over HTTP/SSE as clients. Coordination state lives in the
+broker; work state stays local to each member.
+
+| Dimension | **M1 in-harness** | **M2 separate instances** |
+|---|---|---|
+| Atomicity of coordination state | Trivial (one store) | Fine if coordination state kept in broker (single writer); must not fragment |
+| Isolation / security | Conversation-level (softer); shared process env/secrets | Hard (separate process/storage/box); no shared secrets — matches §5 |
+| Separate models / boxes | Same process/machine; different models OK | Own model endpoint/box/GPU per member; real resource isolation |
+| Failure domain / ops | One process, one failure domain, simple | Per-member independent; broker is critical; more complex ops (N instances + broker) |
+| Build cost (P0) | Low — reuses conversations/config/approvals/watch; no inter-process netting | Higher — inter-instance API, identity/auth, routing, multi-process ops, maybe Postgres store for HA |
+| Fit to A (1 box, trusted team) | Natural fit | Overkill for now |
+| Fit to B (open, multi-box) | Insufficient | Required |
+
+**Reversibility is the key.** The board *store schema* (registry, jobs, knowledge, trust) and the
+coordinator brain + board tools are identical in M1 and M2 — only where members live changes. If you
+build a **member abstraction** from day one (a member is addressed by id and talks via a stable
+register/post/claim/message interface), then migrating a member to its own instance later is a
+*deployment change, not a rewrite*. The cross-instance delegation tool (`send_message` seam) is
+exactly this abstraction: build it against local members now, and it becomes the inter-instance
+protocol unchanged.
+
+**Recommendation: start M1, build M2-ready.**
+- Members = named standing conversations in one harness; board = coordinator + doc families in one
+  storage.
+- Build the member abstraction + cross-instance delegation now (against local members).
+- Keep the discipline: **coordination state lives in the board store** (atomic + migrates cleanly);
+  work state lives in the member.
+- The broker exists from day one — just *co-located* with members in one process until you need to
+  split it out.
+
+**Stepping stone (M1.5):** extract *one* member to its own instance as a pilot (e.g., the sandboxed
+`code` member, or a `research` member on another box) to de-risk M2 incrementally — same board,
+one remote member — before committing the whole team.
+
+**Fit:** M1 for A now; migrate members to M2 one at a time when you need hard isolation, a
+different model/box, or independent scaling (late-A / B).
+
+---
+
 ## Components (refined from the working-session list)
 
 ### 1. Engram registry & agent profiles
