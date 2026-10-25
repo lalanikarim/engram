@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
-import { defineDocFamily, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
+import { defineDoc, defineDocFamily, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
 import { evaluateGate, type CompiledGates, type GateTier } from "./gates.ts";
 
 export type ApprovalState = {
@@ -19,6 +19,61 @@ export type ApprovalState = {
   /** Human-supplied reason (usually for denials), fed back to the agent. */
   reason?: string | null;
 };
+
+/**
+ * A persistent global allow-rule (docs/plans/approvals.md, phase 2): calls whose tool and
+ * every `match` field equal the call's args pass without prompting. Destructive-tier calls
+ * are never matched — the guard is evaluated before rules.
+ */
+export type ApprovalRule = {
+  /** Stable id: sha1(tool + canonical match) — creating the same rule twice is a no-op. */
+  id: string;
+  tool: string;
+  /** Top-level arg fields that must equal the call's args (string values). */
+  match: Record<string, string>;
+  createdAt: number;
+  source: string;
+};
+
+/** Session-scoped singleton holding every allow-rule. */
+export const ApprovalRulesDoc = defineDoc({
+  scope: "session",
+  kind: "mvp.approval-rules",
+  version: 1,
+  initial: (): { rules: ApprovalRule[] } => ({ rules: [] }),
+});
+
+/** Stable rule id from (tool, match). */
+export function ruleIdFor(tool: string, match: Record<string, string>): string {
+  return createHash("sha1")
+    .update(tool)
+    .update(JSON.stringify(canonicalize(match)))
+    .digest("hex")
+    .slice(0, 12);
+}
+
+/**
+ * Default rule scope when a human taps "Always allow": the recipient for send_message,
+ * otherwise every top-level scalar arg (an exact-action rule).
+ */
+export function defaultRuleMatch(tool: string, args: unknown): Record<string, string> {
+  const a = (args ?? {}) as Record<string, unknown>;
+  if (tool === "send_message" && typeof a.to === "string") return { to: a.to };
+  const match: Record<string, string> = {};
+  for (const [k, v] of Object.entries(a)) {
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") match[k] = String(v);
+  }
+  return match;
+}
+
+/** True when some rule matches this call (tool + every match field equal). */
+export function ruleMatches(rules: readonly ApprovalRule[], tool: string, args: unknown): boolean {
+  const a = (args ?? {}) as Record<string, unknown>;
+  return rules.some((r) => {
+    if (r.tool !== tool) return false;
+    return Object.entries(r.match).every(([k, v]) => String(a[k] ?? "") === v);
+  });
+}
 
 export const ApprovalDoc = defineDocFamily<ApprovalState, JsonValue>({
   family: true,
@@ -107,6 +162,12 @@ export function approvalHook(gates: CompiledGates) {
     beforeTool: async (call, api, ctx) => {
       const tier = evaluateGate(gates, call.name, call.arguments);
       if (tier === null || tier === "auto") return undefined; // ungated or auto-approved
+      // Persistent allow-rules: checked after the destructive guard (destructive never
+      // matches) and before the prompt block — matching calls pass silently.
+      if (tier === "prompt") {
+        const rulesDoc = await api.snapshot(ApprovalRulesDoc, ctx);
+        if (rulesDoc && ruleMatches(rulesDoc.rules, call.name, call.arguments)) return undefined;
+      }
       const key = approvalKeyFor(call.name, call.arguments);
       const rec = await api.snapshot(ApprovalDoc, key, ctx);
       if (rec?.decision === "approved") return undefined; // allow

@@ -460,11 +460,34 @@ default, pattern edge cases, config validation, arg rendering). Live api suite n
 (+5 in `[7b]`: `rm -rf` blocked with tier badge, why present in prompt, denial reason
 round-trip, no longer pending after deny). Telegram 24/24 unchanged; `tsc --noEmit` clean.
 
+### Smarter approvals — phase 2 ✅ COMPLETE (2026-10-25, `feature/approvals-phase2`)
+
+Persistent global allow-rules (spec: `docs/plans/approvals.md`, section B):
+
+- **Session-scoped singleton doc** `ApprovalRulesDoc` (`mvp.approval-rules`) holding
+  `{ rules: [{id, tool, match, createdAt, source}] }`. Rule id = sha1(tool + canonical match)
+  → duplicate creation is a no-op. (A single doc rather than a family: pi-durable has no
+  doc-family scan API.)
+- **Hook order** — destructive guard → rule match → tier. A matching rule lets the call pass
+  silently; destructive-tier calls are never matched (the guard wins).
+- **"Always allow" button** on non-destructive prompts (Telegram inline + Web UI). The API
+  (`POST /approvals/:key` with `alwaysAllow: true`) resolves the pending request's tool/args,
+  derives the rule scope server-side (`send_message` → recipient only; other tools → all
+  top-level scalar args), and writes decision + rule in **one commit**. Rejects `alwaysAllow`
+  on destructive items (400).
+- **Management** — `GET /approval-rules`, `DELETE /approval-rules/:id`.
+
+Verification: new unit suite `test/approval-rules.test.ts` — **14/14** (matching, default rule
+scope, id stability). Live api suite now **74/74** (+11 in `[7c]`: approve+alwaysAllow returns a
+rule id, rule stored recipient-scoped, second send to same recipient passes with no new prompt,
+destructive alwaysAllow rejected 400, delete + relist). Telegram now **28/28** (T7: button →
+settle "APPROVED + always allowed" → persisted rule). `tsc --noEmit` clean.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
 container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
 host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
-Next planned work: smarter approvals phases 2–4 (`docs/plans/approvals.md`; phase 1 — risk
-tiers + destructive guard + rich prompts/denial reasons — is done). Everything else in
-PLAN §4 is complete.
+Next planned work: smarter approvals phases 3–4 (`docs/plans/approvals.md`; phases 1–2 — risk
+tiers + destructive guard + rich prompts/denial reasons + persistent allow-rules — are done).
+Everything else in PLAN §4 is complete.

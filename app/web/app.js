@@ -219,14 +219,14 @@ function ApprovalsBanner({ approvals, onDecided }) {
   const [pendingKeys, setPendingKeys] = useState(new Set());
   const [reasons, setReasons] = useState({}); // key → denial reason text
 
-  const decide = async (key, conversationId, decision) => {
+  const decide = async (key, conversationId, decision, alwaysAllow) => {
     setPendingKeys((p) => new Set(p).add(key));
     const reason = reasons[key]?.trim() || undefined;
     try {
       const res = await fetch(`/approvals/${key}`, {
         method: "POST",
         headers: { authorization: `Bearer ${getToken()}`, "content-type": "application/json" },
-        body: JSON.stringify({ decision, ...(reason ? { reason } : {}) }),
+        body: JSON.stringify({ decision, ...(reason ? { reason } : {}), ...(alwaysAllow ? { alwaysAllow: true } : {}) }),
       });
       if (res.status === 409) return; // already decided — the poll will drop it
       if (!res.ok) throw new Error(`approval ${key} → ${res.status}`);
@@ -265,6 +265,8 @@ function ApprovalsBanner({ approvals, onDecided }) {
       <button class="btn small approve" data-testid="approve-btn" disabled=${pendingKeys.has(a.key)}
         onClick=${() => decide(a.key, a.conversationId, "approved")}>
         ${destructive ? "I understand the risk — run it" : "Approve"}</button>
+      ${!destructive && html`<button class="btn small approve" data-testid="always-btn" disabled=${pendingKeys.has(a.key)}
+        onClick=${() => decide(a.key, a.conversationId, "approved", true)}>Always allow</button>`}
       <button class="btn small deny" data-testid="deny-btn" disabled=${pendingKeys.has(a.key)}
         onClick=${() => decide(a.key, a.conversationId, "denied")}>Deny</button>
     </div>`;

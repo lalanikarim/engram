@@ -6,6 +6,7 @@
 //   T4 forum topic → fork of root conversation, answered in the topic thread
 //   T5 durable state file (bindings + offset)
 //   T6 /model picker: provider buttons → model buttons → durable switch
+//   T7 approvals: "Always allow" button → persistent rule
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -193,6 +194,9 @@ async function main() {
   const CHAT = 555;
   const USER = { id: 111, first_name: "Test" };
 
+  // The real model the root conversation starts with (T6 switches it to a mock; T7 needs it back).
+  const ROOT_MODEL = ((await api("GET", "/conversations")).json?.conversations ?? []).find((c: any) => c.id === 1)?.model as string;
+
   // ---- T1: binding + task → progress → final answer ----
   console.log("\n[T1] chat binding → task → progress → final answer");
   enqueue({
@@ -345,6 +349,48 @@ async function main() {
   );
   const rootConv = ((await api("GET", "/conversations")).json?.conversations ?? []).find((c: any) => c.id === 1);
   check("root conversation now runs testbox:model-a", rootConv?.model === "testbox:model-a", `model=${rootConv?.model}`);
+
+  // ---- T7: approvals — "Always allow" button → persistent rule ----
+  console.log("\n[T7] approvals: Always allow → persistent rule");
+  if (ROOT_MODEL) {
+    await api("PATCH", "/conversations/1", { model: ROOT_MODEL }); // back to the real model after T6
+  }
+  enqueue({ update_id: 108, message: { message_id: 6, chat: { id: CHAT }, from: USER, text: 'Use the send_message tool to send dave@x.test the message "hi dave". Then confirm.' } });
+  // Match on the recipient so we don't pick up T3's earlier (already-settled) prompt.
+  const isT7Prompt = (p: Record<string, unknown>) => p.chat_id === CHAT && String(p.text).includes("dave@x.test") && p.reply_markup !== undefined;
+  const apprMsg = await waitFor(() => Boolean(findSent("sendMessage", isT7Prompt)));
+  check("approval prompt posted with buttons", apprMsg);
+  let alwaysData: string | null = null;
+  if (apprMsg) {
+    const kb = ((findSent("sendMessage", isT7Prompt)?.reply_markup as any)?.inline_keyboard ?? []) as Array<Array<{ callback_data: string }>>;
+    alwaysData = kb.flat().map((b) => b.callback_data).find((d) => d.startsWith("always:")) ?? null;
+  }
+  check("prompt offers an Always allow button (non-destructive)", Boolean(alwaysData), JSON.stringify(alwaysData));
+  const APPROVAL_MSG_ID = 902;
+  if (alwaysData) {
+    // Replay the callback against a message id we track: the client edits by msg.message_id.
+    enqueue({ update_id: 109, callback_query: { id: "cb-a1", from: USER, data: alwaysData, message: { chat: { id: CHAT }, message_id: APPROVAL_MSG_ID } } });
+    check(
+      "always-allow settles the prompt with confirmation",
+      await waitFor(() => Boolean(findSent("editMessageText", (p) => String(p.text).includes("APPROVED + always allowed"))), 15_000),
+    );
+    const rules = (await api("GET", "/approval-rules")).json?.rules ?? [];
+    check(
+      "rule persisted with recipient-only scope",
+      rules.some((r: any) => r.tool === "send_message" && JSON.stringify(r.match) === '{"to":"dave@x.test"}'),
+      JSON.stringify(rules),
+    );
+  } else {
+    check("always-allow flow (skipped — no button)", false);
+  }
+
+  if (failed > 0) {
+    console.log("\n--- server log (last 40 lines) ---");
+    console.log(serverLog.split("\n").slice(-40).join("\n"));
+    const approvalTraffic = sent.filter((s) => s.method === "editMessageText" || String(s.payload.text ?? "").includes("APPROVED"));
+    console.log("--- approval-related bot calls ---");
+    for (const s of approvalTraffic.slice(-10)) console.log(JSON.stringify(s).slice(0, 400));
+  }
 
   await client.stop();
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
