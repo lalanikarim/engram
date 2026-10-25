@@ -26,6 +26,63 @@ who/what exists, what work is open, who did what, and what each party is allowed
 
 ---
 
+## Shape / topology of the board
+
+Two questions: is it a broker? is it an engram with extra wiring? **Both, layered.**
+
+**The substrate nearly forces a broker.** pi-durable has one process owning one storage at a time,
+with no cross-process locking. The coordination *store* (registry, jobs, claims, trust, routing,
+knowledge index) must have a **single authoritative owner** to stay atomic and exactly-once. A purely
+peer-to-peer shared board across independent instances is impossible without a central owner or a
+custom Postgres-backed store. So the board's system of record is a **single-owner durable service =
+broker**, whether members are conversations in one harness or separate instances.
+
+**Layer an engram brain on top.** The broker should also be an engram (a root "coordinator"
+conversation + board tools) for the parts that benefit from judgment: triage/routing ("who's best
+for this job?"), synthesis, drafting to the human, anomaly detection. **Broker topology underneath,
+engram reasoning on top.** This is the front-desk/triage member with extra responsibilities.
+
+**Keep the system of record separate from the brain.** Authoritative coordination state lives in
+durable *documents* owned by the broker's process — deterministic, atomic, not subject to compaction
+or context limits. The brain reads/writes those docs but does not *be* them (don't let a compacting
+transcript hold the registry or job queue).
+
+**Members are clients of the board.** Other engrams connect over the same HTTP/SSE client model
+Telegram/Web UI already use (`POST /tasks`, `GET /stream`). They register, post/claim jobs, and
+exchange routed messages *through* the board — reusing tested client code, one source of truth.
+
+**Depends on the member model:**
+- *In-harness (low-risk start):* one harness holds the coordinator + member conversations as owned
+  sub-conversations; board = root coordinator + registry/job docs in a single storage. Cross-member
+  DMs/jobs are trivially shared state. No separate processes.
+- *Multi-instance (A-full / B):* each member is its own instance (own process/storage/model/box);
+  all connect to the central broker over the API. The broker owns the coordination store; members
+  own their workspaces/transcripts. This is where the broker shape earns its keep.
+
+**Other considerations:**
+- *Control boundary:* everything transits the board → natural place to enforce trust tiers, route
+  approvals to the human, and contain a bad member. Centralizing policy where you want authority is
+  a feature.
+- *Failure domain:* central = one failure domain, but durable (`resume`/checkpoints). Keep the broker
+  minimal, LAN-only, holding **no member secrets** (members keep their own).
+- *Bottleneck:* only coordination *metadata* transits the broker; heavy content (job execution, long
+  chats) stays in members' contexts → not a real bottleneck at A or even B scale.
+- *Compromise risk:* a compromised broker is worst-case. Mitigations: minimal surface, no central
+  secrets, per-member sandboxing, human can revoke/reconfigure centrally; for B, make the policy
+  layer auditable + trust model explicit.
+- *Federated (no central broker):* more organic, no single compromise point — but conflicts with
+  single-owner storage, needs a custom shared store/consensus, and still leaves "who enforces
+  policy." Not the right first shape; revisit for B only if/when a Postgres-backed store exists.
+- *Evolution path:* in-harness coordinator → extract to a broker *process* (when separate
+  instances/models/boxes are needed) → society commons. Same board store schema throughout.
+
+**Recommendation:** build the board as a **single-owner broker that is itself an engram** —
+deterministic coordination store underneath, reasoning brain on top, members as clients. Start
+in-harness; extract to a process when isolation demands it. The one decision that shapes this is the
+**member model** (in-harness vs separate instances).
+
+---
+
 ## Components (refined from the working-session list)
 
 ### 1. Engram registry & agent profiles
