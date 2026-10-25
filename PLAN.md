@@ -127,6 +127,13 @@ Threats: (a) network attackers reaching the agent, (b) prompt injection via untr
 7. **Containment last line:** the agent container itself runs unprivileged, with **no container-engine socket** inside it (sandbox containers are started by a tightly-scoped CLI wrapper around `podman` run/exec that only allows the approved base image and mounts), and the box's firewall restricts what the sandbox can reach on the LAN.
 
 ## 6. Roadmap after MVP (from C2/E4)
+
+Detailed plans for in-flight/next items live in [`docs/plans/`](docs/plans/) (model catalog —
+done; smarter approvals — planned, phase 1 next).
+
+- **Smarter approvals** — risk-tiered gating (`gates.json`), destructive-action guard that always
+  wins, persistent global allow-rules, rich prompts with denial reasons, 24 h TTL. Plan:
+  [`docs/plans/approvals.md`](docs/plans/approvals.md).
 - **Email client** — IMAP poller → submit with `requestId`; replies via SMTP; approval-gated sending.
 - **Agent-to-agent / MCP bridge** — expose the agent over MCP so other agents (e.g., a pi coding agent session) can drive it; codemode already bridges tools.
 - **Dashboards** — read-only clients on `documentState`/`viewState`: costs/tokens, todos, run status.
@@ -184,11 +191,16 @@ useful, reuses almost everything built). If the goal is a *multi-agent substrate
 
 ### Decision log (2026-10-25)
 
-- **Multi-provider model support** (branch `feature/model-catalog`, spec in
+- **Multi-provider model support** (merged as PR #21 + #22; spec in
   `docs/plans/model-catalog.md`): the app registers all pi-supported providers plus custom
   models from the global pi config (`~/.pi/agent/models.json` + `auth.json`) — no key
   duplication. Model refs are `<provider>:<modelId>` (first-colon split). The global default is
   operator-configured via `DEFAULT_MODEL` (no provider preferred out of the box); each
-  conversation can durably pin its own model (API `PATCH`, Telegram `/model`). This deliberately
-  relaxes §1 "local models only / no cloud spend": hosted providers (e.g. opencode-go) are
-  available per operator choice, and local hosts remain the default fallback.
+  conversation can durably pin its own model (API `PATCH`, Telegram `/model` button picker).
+  This deliberately relaxes §1 "local models only / no cloud spend": hosted providers
+  (e.g. opencode-go) are available per operator choice, and local hosts remain the default
+  fallback.
+- **Smarter approvals** (planned; spec in `docs/plans/approvals.md`): risk-tiered gating with a
+  destructive-action guard that always wins and can never be allow-listed; persistent global
+  allow-rules ("always allow"); rich prompts with denial reasons fed back to the agent; 24 h
+  TTL auto-deny. Phases: tiers+guard+prompts → rules → TTL → batching; classifier scoring deferred.
