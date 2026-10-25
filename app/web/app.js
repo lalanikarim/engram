@@ -249,11 +249,39 @@ function ApprovalsBanner({ approvals, onDecided }) {
     }
   };
 
+  // Batch decision (phase 4): one commit for N keys, then one feedback instruction.
+  const decideAll = async (keys, conversationId) => {
+    setPendingKeys((p) => new Set([...p, ...keys]));
+    try {
+      const res = await fetch(`/approvals/batch`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${getToken()}`, "content-type": "application/json" },
+        body: JSON.stringify({ keys, decision: "approved" }),
+      });
+      if (!res.ok) throw new Error(`batch → ${res.status}`);
+      const body = await res.json();
+      const decided = (body.results ?? []).filter((r) => r.status === "decided").map((r) => r.key);
+      if (decided.length > 0) {
+        const content = `The human APPROVED these actions in batch: ${decided.map((k) => `\`${k}\``).join(", ")}. Retry each with the exact same arguments.`;
+        await api("/tasks", { method: "POST", body: { content, requestId: crypto.randomUUID(), conversationId } });
+      }
+    } catch (err) {
+      console.error("decideAll:", err);
+      setPendingKeys((p) => {
+        const n = new Set(p);
+        for (const k of keys) n.delete(k);
+        return n;
+      });
+    } finally {
+      onDecided?.();
+    }
+  };
+
   if (approvals.length === 0) return null;
-  return html`<div class="approvals" data-testid="approvals">
-    ${approvals.map((a) => {
-      const destructive = a.tier === "destructive";
-      return html`<div class="approval${destructive ? " destructive" : ""}" key=${a.key}>
+
+  const itemHtml = (a) => {
+    const destructive = a.tier === "destructive";
+    return html`<div class="approval${destructive ? " destructive" : ""}" key=${a.key}>
       <span>${destructive ? "🔴" : "⚠️"}</span>
       ${destructive && html`<span class="a-tier">DESTRUCTIVE</span>`}
       <span class="a-what">${a.tool}: ${renderAction(a.tool, a.args)}</span>
@@ -270,7 +298,33 @@ function ApprovalsBanner({ approvals, onDecided }) {
       <button class="btn small deny" data-testid="deny-btn" disabled=${pendingKeys.has(a.key)}
         onClick=${() => decide(a.key, a.conversationId, "denied")}>Deny</button>
     </div>`;
+  };
+
+  // Group non-destructive items per conversation: ≥2 in one conversation get a grouped
+  // banner with "Approve all" (phase 4). Destructive items are ALWAYS standalone.
+  const byConv = new Map();
+  for (const a of approvals) {
+    if (a.tier === "destructive") continue;
+    const list = byConv.get(a.conversationId) ?? [];
+    list.push(a);
+    byConv.set(a.conversationId, list);
+  }
+  const grouped = new Set();
+  for (const items of byConv.values()) if (items.length >= 2) for (const a of items) grouped.add(a.key);
+
+  return html`<div class="approvals" data-testid="approvals">
+    ${approvals.map((a) => {
+      if (grouped.has(a.key)) return null; // rendered inside its group below
+      return itemHtml(a);
     })}
+    ${[...byConv.entries()].filter(([, items]) => items.length >= 2).map(([convId, items]) => html`
+      <div class="approval group" data-testid="approval-group">
+        <span>⚠️</span>
+        <span class="a-what">${items.length} actions awaiting approval (conversation ${convId})</span>
+        <button class="btn small approve" data-testid="approve-all-btn" disabled=${items.some((a) => pendingKeys.has(a.key))}
+          onClick=${() => decideAll(items.map((a) => a.key), convId)}>Approve all ${items.length}</button>
+        ${items.map(itemHtml)}
+      </div>`)}
   </div>`;
 }
 

@@ -1,6 +1,6 @@
 # Smarter approvals — risk tiers, persistent rules, destructive guard
 
-Status: **phases 1–2 implemented** (2026-10-25); phases 3–4 pending. Decisions recorded from discussion with the owner.
+Status: **phases 1–3 implemented** (2026-10-25); phase 4 pending. Decisions recorded from discussion with the owner.
 
 ## Current state (what works, what's dumb)
 
@@ -121,8 +121,8 @@ Patterns are deliberately conservative — when in doubt, prompt.
 |---|---|---|---|
 | 1 | Tiers + destructive guard (A) + rich prompts & denial reasons (E) | safe `bash` command runs without prompt; `rm -rf` blocked with destructive UI even if an allow-rule exists for that tool; denial reason reaches the agent's next turn | ✅ done — gates unit suite 19/19; live api suite 63/63 incl. `[7b]` (destructive block + tier badge + why + denial reason round-trip) |
 | 2 | Persistent rules (B) | "Always allow" on a `send_message` → identical-recipient sends pass silently thereafter; rule listed/deleted via API; destructive call never auto-passes | ✅ done — rules unit suite 14/14; live api `[7c]` (approve+alwaysAllow → rule stored, second send silent, destructive alwaysAllow rejected, delete); telegram T7 (button → settle + persisted rule) |
-| 3 | TTL (D) | pending approval past 24 h auto-denies durably and disappears from `/approvals`; agent notified |
-| 4 | Batching (C) | grouped prompt for N pending; "approve all" records N distinct durable decisions |
+| 3 | TTL (D) | pending approval past 24 h auto-denies durably and disappears from `/approvals`; agent notified | ✅ done — rules/TTL unit suites; live api `[7d]` (blocked → lapsed → gone from list → durable `ttl` denial → notified) |
+| 4 | Batching (C) | grouped prompt for N pending; "approve all" records N distinct durable decisions | ✅ done — api `[7e]` (batch approve → 200 all decided, not-pending cleared, retry executes both; destructive batch → 400; empty/unknown keys → 400/not_found); telegram grouped ballot + web grouped banner |
 
 Test additions: unit tests for tier evaluation order (destructive > rule > tier), pattern
 matching, TTL expiry, rule matching; live checks in `api.test.ts` / `telegram.test.ts` for the

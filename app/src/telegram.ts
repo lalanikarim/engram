@@ -241,6 +241,8 @@ export class TelegramClient {
   private watchers = new Map<number, ProgressWatcher>();
   /** approval key → button message + conversation, so we can settle its UI and route the retry. */
   private approvalMsgs = new Map<string, { key: string; msgId: number; convId: number }>();
+  /** Grouped "approve all" prompts (phase 4), one per conversation. */
+  private ballotMsgs = new Map<number, { chatKey: string; msgId: number; keys: string[] }>();
   private postedKeys = new Set<string>();
   private pollTimer?: ReturnType<typeof setInterval>;
   private opts: TelegramClientOptions;
@@ -440,37 +442,84 @@ export class TelegramClient {
           conversationId: number;
         }>;
       };
-      // Only conversations this bot owns.
+      // Only conversations this bot owns; group unposted items per conversation.
       const mine = new Map<number, string>();
       for (const [k, b] of Object.entries(this.state.chats)) mine.set(b.conversationId, k);
+      const byConv = new Map<number, typeof body.approvals>();
       for (const a of body.approvals) {
-        const key = mine.get(a.conversationId);
-        if (!key || this.postedKeys.has(a.key)) continue;
-        const destructive = a.tier === "destructive";
-        const action = renderAction(a.tool, a.args).slice(0, 500);
-        const whyLine = a.why ? `\nWhy: ${a.why.slice(0, 300)}` : "";
-        const badge = destructive ? "⚠️ DESTRUCTIVE — " : "";
-        const r = await this.tg("sendMessage", {
-          ...this.msgTarget(key),
-          text:
-            `${destructive ? "🔴" : "⚠️"} ${badge}The agent wants to run \`${a.tool}\`:\n${action}${whyLine}\nKey: \`${a.key}\`` +
-            (destructive
-              ? "\nThis action is destructive. Approving requires explicitly acknowledging the risk. Deny with a reason via: deny <key> because …"
-              : "\nDeny with a reason via: deny <key> because …"),
-          reply_markup: {
-            inline_keyboard: [
-              destructive
-                ? [{ text: "⚠️ I understand the risk — run it", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }]
-                : [{ text: "✅ Approve", callback_data: `approve:${a.key}` }, { text: "🔁 Always allow", callback_data: `always:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }],
-            ],
-          },
-        });
-        this.approvalMsgs.set(a.key, { key, msgId: Number(r.message_id), convId: a.conversationId });
-        this.postedKeys.add(a.key); // only after a real send; next tick retries otherwise
+        if (!mine.has(a.conversationId) || this.postedKeys.has(a.key)) continue;
+        const list = byConv.get(a.conversationId) ?? [];
+        list.push(a);
+        byConv.set(a.conversationId, list);
+      }
+      for (const [convId, items] of byConv) {
+        const chatKey = mine.get(convId)!;
+        // Destructive items are ALWAYS individual — never batched.
+        for (const a of items.filter((x) => x.tier === "destructive")) await this.postSingle(a, chatKey, convId);
+        const promptItems = items.filter((x) => x.tier !== "destructive");
+        if (promptItems.length === 1) await this.postSingle(promptItems[0], chatKey, convId);
+        else if (promptItems.length >= 2) await this.postBallot(promptItems, chatKey, convId);
       }
     } catch (e) {
       console.error("[telegram] approvals:", errText(e));
     }
+  }
+
+  /** One approval request as its own message with per-action buttons. */
+  private async postSingle(
+    a: { key: string; tool: string; args: Record<string, unknown>; tier?: string; why?: string },
+    chatKey: string,
+    convId: number,
+  ): Promise<void> {
+    const destructive = a.tier === "destructive";
+    const action = renderAction(a.tool, a.args).slice(0, 500);
+    const whyLine = a.why ? `\nWhy: ${a.why.slice(0, 300)}` : "";
+    const badge = destructive ? "⚠️ DESTRUCTIVE — " : "";
+    const r = await this.tg("sendMessage", {
+      ...this.msgTarget(chatKey),
+      text:
+        `${destructive ? "🔴" : "⚠️"} ${badge}The agent wants to run \`${a.tool}\`:\n${action}${whyLine}\nKey: \`${a.key}\`` +
+        (destructive
+          ? "\nThis action is destructive. Approving requires explicitly acknowledging the risk. Deny with a reason via: deny <key> because …"
+          : "\nDeny with a reason via: deny <key> because …"),
+      reply_markup: {
+        inline_keyboard: [
+          destructive
+            ? [{ text: "⚠️ I understand the risk — run it", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }]
+            : [{ text: "✅ Approve", callback_data: `approve:${a.key}` }, { text: "🔁 Always allow", callback_data: `always:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }],
+        ],
+      },
+    });
+    this.approvalMsgs.set(a.key, { key: chatKey, msgId: Number(r.message_id), convId });
+    this.postedKeys.add(a.key); // only after a real send; next tick retries otherwise
+  }
+
+  /**
+   * Grouped prompt (phase 4): N pending actions from one conversation as ONE message —
+   * per-action approve/deny rows plus "Approve all" (callback `ballot`). Destructive
+   * items never appear here; they get their own explicit message.
+   */
+  private async postBallot(
+    items: Array<{ key: string; tool: string; args: Record<string, unknown>; tier?: string }>,
+    chatKey: string,
+    convId: number,
+  ): Promise<void> {
+    const lines = items.map((a, i) => `${i + 1}. \`${a.tool}\` → ${renderAction(a.tool, a.args).slice(0, 200)}\n   Key: \`${a.key}\``);
+    const r = await this.tg("sendMessage", {
+      ...this.msgTarget(chatKey),
+      text: `⚠️ ${items.length} actions awaiting approval:\n${lines.join("\n")}\nDeny with a reason via: deny <key> because …`,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `✅ Approve all ${items.length}`, callback_data: "ballot" }],
+          ...items.map((a, i) => [
+            { text: `✅ ${i + 1}`, callback_data: `approve:${a.key}` },
+            { text: `❌ ${i + 1}`, callback_data: `deny:${a.key}` },
+          ]),
+        ],
+      },
+    });
+    for (const a of items) this.postedKeys.add(a.key); // only after a real send; next tick retries otherwise
+    this.ballotMsgs.set(convId, { chatKey, msgId: Number(r.message_id), keys: items.map((a) => a.key) });
   }
 
   private async handleCallback(q: CallbackQuery): Promise<void> {
@@ -486,6 +535,10 @@ export class TelegramClient {
     if (!key) return;
     if (action === "approve") {
       await this.decide("approved", key, `telegram:${q.from?.first_name ?? "user"}`);
+    } else if (action === "ballot") {
+      // "Approve all": batch-decide every still-pending non-destructive action of the
+      // conversation that owns the ballot message.
+      await this.decideBallot(q, `telegram:${q.from?.first_name ?? "user"}`);
     } else if (action === "always") {
       // Approve AND write a persistent allow-rule in one commit.
       await this.decide("approved", key, `telegram:${q.from?.first_name ?? "user"}`, undefined, true);
@@ -532,6 +585,46 @@ export class TelegramClient {
         ? `The human APPROVED action key ${key}. Retry the action with the exact same arguments.`
         : `The human DENIED action key ${key}.${reasonLine} Do not retry it; report that it was declined and adapt if the reason suggests a different approach.`;
     await this.apiPost("/tasks", { content, requestId: `tg-${decision}-${key}-${Date.now()}`, conversationId: convId });
+  }
+
+  /** Batch-approve every still-pending non-destructive action of one conversation. */
+  private async decideBallot(q: CallbackQuery, decidedBy: string): Promise<void> {
+    const msg = q.message as { chat?: { id?: number }; message_thread_id?: number } | undefined;
+    if (!msg?.chat?.id) return;
+    const binding = this.state.chats[chatKey(msg.chat.id, msg.message_thread_id)];
+    if (!binding) return;
+    // Re-read the pending list: only decide what is still open.
+    const res = await fetch(`${this.opts.apiBaseUrl}/approvals`, {
+      headers: { authorization: `Bearer ${this.opts.apiToken}` },
+    });
+    if (!res.ok) return;
+    const body = (await res.json()) as { approvals: Array<{ key: string; conversationId: number; tier?: string }> };
+    const keys = body.approvals
+      .filter((a) => a.conversationId === binding.conversationId && a.tier !== "destructive")
+      .map((a) => a.key);
+    if (keys.length === 0) return; // all already decided
+    const post = await fetch(`${this.opts.apiBaseUrl}/approvals/batch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.opts.apiToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ keys, decision: "approved" }),
+    });
+    // Settle the grouped prompt (edit away the buttons).
+    const posted = this.ballotMsgs.get(binding.conversationId);
+    if (posted) {
+      await this.tg("editMessageText", {
+        ...this.msgTarget(posted.chatKey),
+        message_id: posted.msgId,
+        text: `🔒 ✅ APPROVED ALL (${keys.length}) by ${decidedBy}`,
+      }).catch(() => {});
+      this.ballotMsgs.delete(binding.conversationId);
+    }
+    if (post.status !== 200) {
+      console.error(`[telegram] batch POST: ${post.status} ${(await post.text().catch(() => ""))}`);
+      return;
+    }
+    // One feedback instruction covering the whole batch.
+    const content = `The human APPROVED these actions in batch: ${keys.map((k) => `\`${k}\``).join(", ")}. Retry each with the exact same arguments.`;
+    await this.apiPost("/tasks", { content, requestId: `tg-ballot-${binding.conversationId}-${Date.now()}`, conversationId: binding.conversationId });
   }
 
   /** Conversation owning a still-pending approval key (via GET /approvals). */

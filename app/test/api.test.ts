@@ -581,6 +581,53 @@ async function main() {
     tStream.close();
   }
 
+  console.log("\n[7e] approval batching");
+  // Two pending sends → one batch approve → both decided, then both execute via retry.
+  const subB1 = await submit('Use the send_message tool to send frank@x.test the message "batch frank". Then confirm.', "t-batch-1");
+  check("batch: frank send blocked", await rootStream.waitForRunEnd(subB1, RUN_TIMEOUT));
+  const subB2 = await submit('Use the send_message tool to send grace@x.test the message "batch grace". Then confirm.', "t-batch-2");
+  check("batch: grace send blocked", await rootStream.waitForRunEnd(subB2, RUN_TIMEOUT));
+  const apprB = await api("GET", "/approvals");
+  const batchItems = (apprB.json?.approvals ?? []).filter((a: any) => ["frank@x.test", "grace@x.test"].includes(a.args?.to));
+  check("two sends pending for batch", batchItems.length === 2, JSON.stringify(apprB.json));
+  if (batchItems.length === 2) {
+    const keys = batchItems.map((a: any) => a.key);
+    const batchRes = await api("POST", "/approvals/batch", { keys, decision: "approved" });
+    check(
+      "batch approve → 200, all decided",
+      batchRes.status === 200 && (batchRes.json?.results ?? []).every((r: any) => r.status === "decided"),
+      JSON.stringify(batchRes.json),
+    );
+    const apprB2 = await api("GET", "/approvals");
+    check(
+      "batch: keys no longer pending",
+      (apprB2.json?.approvals ?? []).filter((a: any) => ["frank@x.test", "grace@x.test"].includes(a.args?.to)).length === 0,
+      JSON.stringify(apprB2.json),
+    );
+    const subB3 = await submit(`The human APPROVED these actions in batch: \`${keys[0]}\`, \`${keys[1]}\`. Retry each with the exact same arguments.`, "t-batch-3");
+    check("batch: retry run completes", await rootStream.waitForRunEnd(subB3, RUN_TIMEOUT));
+    const execB = (await api("GET", "/conversations/1/entries?after=0&limit=300")).json?.entries ?? [];
+    const execTexts = execB.flatMap((en: any) => en.model ?? []).map((m: any) => JSON.stringify(m)).join("\n");
+    check("batch: both sends executed", execTexts.includes("batch frank") && execTexts.includes("batch grace"), execTexts.slice(0, 300));
+  }
+
+  // Destructive items can never be batched.
+  const subB4 = await submit("Run the bash command `rm -rf /tmp/engram-batch-test` and confirm.", "t-batch-4");
+  check("batch: destructive blocked", await rootStream.waitForRunEnd(subB4, RUN_TIMEOUT));
+  const apprD3 = await api("GET", "/approvals");
+  const destrBatch = (apprD3.json?.approvals ?? []).find((a: any) => a.tier === "destructive" && JSON.stringify(a.args).includes("rm -rf"));
+  if (destrBatch) {
+    const badBatch = await api("POST", "/approvals/batch", { keys: [destrBatch.key], decision: "approved" });
+    check("batch approve rejected for destructive", badBatch.status === 400);
+    await api("POST", `/approvals/${destrBatch.key}`, { decision: "denied" });
+  } else {
+    check("batch destructive (skipped — no item)", false);
+  }
+  const badBatch2 = await api("POST", "/approvals/batch", { keys: [], decision: "approved" });
+  check("batch empty keys → 400", badBatch2.status === 400);
+  const badBatch3 = await api("POST", "/approvals/batch", { keys: ["zzzzzzzzzzzz"], decision: "approved" });
+  check("batch unknown key → not_found", badBatch3.status === 200 && badBatch3.json?.results?.[0]?.status === "not_found", JSON.stringify(badBatch3.json));
+
   console.log("\n[8] subagents: parallel delegate fan-out");
   const sub8 = await submit(
     'Use the delegate tool with two jobs in parallel: (1) researcher — fetch https://example.com and report its title in under 10 words; (2) worker — create a file note.txt containing "from worker" and confirm it. Then summarize both results.',
