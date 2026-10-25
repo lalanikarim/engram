@@ -5,8 +5,9 @@
 //   T3 gated action → inline approval button → callback → settle UI → retry → executed once
 //   T4 forum topic → fork of root conversation, answered in the topic thread
 //   T5 durable state file (bindings + offset)
+//   T6 /model picker: provider buttons → model buttons → durable switch
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -38,6 +39,14 @@ if (!process.env.OPENAI_BASE_URL && !pocEnv.OPENAI_BASE_URL) {
 const base = mkdtempSync(path.join(tmpdir(), "engram-tg-"));
 const dirs = { data: path.join(base, "data"), work: path.join(base, "work"), kb: path.join(base, "kb"), config: path.join(base, "config") };
 for (const d of Object.values(dirs)) mkdirSync(d, { recursive: true });
+// Hermetic agent dir for the model catalog: one deterministic custom provider
+// (T6 exercises it without depending on the global ~/.pi/agent config).
+const agentDir = path.join(base, "agent");
+mkdirSync(agentDir, { recursive: true });
+writeFileSync(
+  path.join(agentDir, "models.json"),
+  JSON.stringify({ providers: { testbox: { baseUrl: "http://127.0.0.1:9/v1", apiKey: "k", models: [{ id: "model-a" }, { id: "model-b" }] } } }),
+);
 
 const TOKEN = "tg-test-token";
 const APP_PORT = 18950;
@@ -136,6 +145,7 @@ const proc = spawn("node", [path.join(APP_ROOT, "src", "main.ts")], {
     KB_DIR: dirs.kb,
     CONFIG_DIR: dirs.config,
     GATED_TOOLS: "send_message",
+    PI_AGENT_DIR: agentDir,
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -297,6 +307,44 @@ async function main() {
     check("topic binding in state", state.chats?.["555:777"]?.conversationId === topicConvId);
     check("polling offset advanced", typeof state.offset === "number" && state.offset > 104);
   }
+
+  // ---- T6: /model picker — provider buttons → model buttons → durable switch ----
+  console.log("\n[T6] /model picker: provider buttons → model buttons → switch");
+  enqueue({ update_id: 105, message: { message_id: 5, chat: { id: CHAT }, from: USER, text: "/model" } });
+  const menu = await waitFor(() => Boolean(findSent("sendMessage", (p) => p.chat_id === CHAT && String(p.text).includes("Pick a provider") && p.reply_markup !== undefined)));
+  check("provider menu posted with buttons", menu);
+  let provButtons: string[] = [];
+  if (menu) {
+    const kb = ((findSent("sendMessage", (p) => String(p.text).includes("Pick a provider"))?.reply_markup as any)?.inline_keyboard ?? []) as Array<Array<{ callback_data: string }>>;
+    provButtons = kb.flat().map((b) => b.callback_data);
+  }
+  check("menu offers the custom testbox provider", provButtons.includes("mprov:testbox"), JSON.stringify(provButtons));
+
+  const PICKER_MSG_ID = 901;
+  enqueue({ update_id: 106, callback_query: { id: "cb-m1", from: USER, data: "mprov:testbox", message: { chat: { id: CHAT }, message_id: PICKER_MSG_ID } } });
+  const modelMenu = await waitFor(
+    () => Boolean(findSent("editMessageText", (p) => p.message_id === PICKER_MSG_ID && String(p.text).includes("Models on testbox") && p.reply_markup !== undefined)),
+    15_000,
+  );
+  check("model menu rendered on provider click", modelMenu);
+  let modelButtons: string[] = [];
+  if (modelMenu) {
+    const kb = ((findSent("editMessageText", (p) => p.message_id === PICKER_MSG_ID && String(p.text).includes("Models on testbox"))?.reply_markup as any)?.inline_keyboard ?? []) as Array<Array<{ callback_data: string }>>;
+    modelButtons = kb.flat().map((b) => b.callback_data);
+  }
+  check(
+    "model menu lists both models + back button",
+    modelButtons.includes("mmodel:testbox:model-a") && modelButtons.includes("mmodel:testbox:model-b") && modelButtons.includes("mlist"),
+    JSON.stringify(modelButtons),
+  );
+
+  enqueue({ update_id: 107, callback_query: { id: "cb-m2", from: USER, data: "mmodel:testbox:model-a", message: { chat: { id: CHAT }, message_id: PICKER_MSG_ID } } });
+  check(
+    "switch confirmation settles the picker message",
+    await waitFor(() => Boolean(findSent("editMessageText", (p) => p.message_id === PICKER_MSG_ID && String(p.text).includes("Model switched to testbox:model-a") && p.reply_markup === undefined)), 15_000),
+  );
+  const rootConv = ((await api("GET", "/conversations")).json?.conversations ?? []).find((c: any) => c.id === 1);
+  check("root conversation now runs testbox:model-a", rootConv?.model === "testbox:model-a", `model=${rootConv?.model}`);
 
   await client.stop();
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);

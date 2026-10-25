@@ -454,7 +454,13 @@ export class TelegramClient {
   private async handleCallback(q: CallbackQuery): Promise<void> {
     if (this.opts.allowedIds.length > 0 && !this.opts.allowedIds.includes(q.from?.id ?? -1)) return;
     await this.tg("answerCallbackQuery", { callback_query_id: q.id }).catch(() => {});
-    const [decision, key] = String(q.data).split(":");
+    const data = String(q.data);
+    // Model picker flow (provider → model → switch).
+    if (data === "mlist" || data.startsWith("mprov:") || data.startsWith("mmodel:")) {
+      await this.handleModelCallback(q, data);
+      return;
+    }
+    const [decision, key] = data.split(":");
     if (!key || (decision !== "approve" && decision !== "deny")) return;
     await this.decide(decision === "approve" ? "approved" : "denied", key, `telegram:${q.from?.first_name ?? "user"}`);
   }
@@ -533,14 +539,8 @@ export class TelegramClient {
     }
     try {
       if (!arg) {
-        const body = await this.apiRequest("GET", "/models");
-        const models = (body.models ?? []) as Array<{ provider: string; id: string; available: boolean }>;
-        const def = String(body.default ?? "");
-        const lines = models
-          .filter((m) => m.available)
-          .map((m) => `${m.provider}:${m.id}${`${m.provider}:${m.id}` === def ? " (default)" : ""}`);
-        const list = lines.length > 0 ? lines.join("\n") : "(no available models)";
-        await this.tg("sendMessage", { ...target, text: `Available models — /model <provider>:<modelId> to switch:\n${list}` }).catch(() => {});
+        // Interactive picker: provider buttons first, models on click.
+        await this.sendProviderMenu(chatId, threadId);
       } else {
         const body = await this.apiRequest("PATCH", `/conversations/${binding.conversationId}`, { model: arg });
         await this.tg("sendMessage", { ...target, text: `Model switched to ${String(body.model)}.` }).catch(() => {});
@@ -548,6 +548,98 @@ export class TelegramClient {
     } catch (e) {
       await this.tg("sendMessage", { ...target, text: `model command failed: ${String(e instanceof Error ? e.message : e)}` }).catch(() => {});
     }
+  }
+
+  /** First step of the picker: one button per provider with available models. */
+  private async sendProviderMenu(chatId: number, threadId: number | undefined): Promise<void> {
+    const target = { chat_id: chatId, ...(threadId ? { message_thread_id: threadId } : {}) };
+    try {
+      const body = await this.apiRequest("GET", "/providers");
+      const providers = (body.providers ?? []) as Array<{ id: string; modelCount: number; available: boolean }>;
+      const usable = providers.filter((p) => p.available && p.modelCount > 0);
+      if (usable.length === 0) {
+        await this.tg("sendMessage", { ...target, text: "No providers with available models are configured." }).catch(() => {});
+        return;
+      }
+      const rows = usable.map((p) => [{ text: p.id, callback_data: `mprov:${p.id}` }]);
+      await this.tg("sendMessage", {
+        ...target,
+        text: "Pick a provider:",
+        reply_markup: { inline_keyboard: rows },
+      }).catch(() => {});
+    } catch (e) {
+      await this.tg("sendMessage", { ...target, text: `model command failed: ${String(e instanceof Error ? e.message : e)}` }).catch(() => {});
+    }
+  }
+
+  /** Callbacks for the picker: provider list (re)render, model list, final switch. */
+  private async handleModelCallback(q: CallbackQuery, data: string): Promise<void> {
+    const msg = q.message;
+    if (!msg?.chat || msg.message_id === undefined) return;
+    const key = chatKey(msg.chat.id, msg.message_thread_id);
+    const binding = this.state.chats[key];
+    if (!binding) {
+      await this.tg("answerCallbackQuery", { callback_query_id: q.id, alert: "This chat isn't bound yet." }).catch(() => {});
+      return;
+    }
+    try {
+      if (data.startsWith("mmodel:")) {
+        // Model ids never contain ":" in pi's catalogs; join defensively anyway.
+        const ref = data.slice("mmodel:".length);
+        const body = await this.apiRequest("PATCH", `/conversations/${binding.conversationId}`, { model: ref });
+        await this.tg(
+          "editMessageText",
+          { ...this.msgTarget(key), message_id: Number(msg.message_id), text: `🤖 Model switched to ${String(body.model)}.` },
+        ).catch(() => {});
+      } else {
+        const providerId = data === "mlist" ? undefined : data.slice("mprov:".length);
+        await this.renderModelMenu(q, key, providerId);
+      }
+    } catch (e) {
+      await this.tg(
+        "answerCallbackQuery",
+        { callback_query_id: q.id, alert: String(e instanceof Error ? e.message : e).slice(0, 200) },
+      ).catch(() => {});
+    }
+  }
+
+  /** Render the provider list (no id) or one provider's models into the picker message. */
+  private async renderModelMenu(q: CallbackQuery, key: string, providerId?: string): Promise<void> {
+    const msg = q.message!;
+    if (!providerId) {
+      const body = await this.apiRequest("GET", "/providers");
+      const providers = (body.providers ?? []) as Array<{ id: string; modelCount: number; available: boolean }>;
+      const rows = providers
+        .filter((p) => p.available && p.modelCount > 0)
+        .map((p) => [{ text: p.id, callback_data: `mprov:${p.id}` }]);
+      await this.tg(
+        "editMessageText",
+        { ...this.msgTarget(key), message_id: Number(msg.message_id), text: "Pick a provider:", reply_markup: { inline_keyboard: rows } },
+      ).catch(() => {});
+      return;
+    }
+    const body = await this.apiRequest("GET", `/providers/${encodeURIComponent(providerId)}/models`);
+    const models = (body.models ?? []) as Array<{ id: string; available: boolean }>;
+    const usable = models.filter((m) => m.available);
+    // Telegram callback_data is capped at 64 bytes — fall back to a text list when any ref overflows.
+    const tooLong = usable.some((m) => Buffer.byteLength(`mmodel:${providerId}:${m.id}`, "utf8") > 63);
+    if (usable.length === 0 || tooLong) {
+      const lines = usable.map((m) => `/model ${providerId}:${m.id}`).join("\n");
+      await this.tg(
+        "editMessageText",
+        { ...this.msgTarget(key), message_id: Number(msg.message_id), text: `Models on ${providerId} — send one to switch:\n${lines || "(none available)"}` },
+      ).catch(() => {});
+      return;
+    }
+    const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+    for (let i = 0; i < usable.length; i += 4) {
+      rows.push(usable.slice(i, i + 4).map((m) => ({ text: m.id.slice(0, 40), callback_data: `mmodel:${providerId}:${m.id}` })));
+    }
+    rows.push([{ text: "⬅️ Providers", callback_data: "mlist" }]);
+    await this.tg(
+      "editMessageText",
+      { ...this.msgTarget(key), message_id: Number(msg.message_id), text: `Models on ${providerId}:`, reply_markup: { inline_keyboard: rows } },
+    ).catch(() => {});
   }
 }
 
@@ -566,4 +658,6 @@ interface CallbackQuery {
   id: string;
   from: { id: number; first_name?: string };
   data: string;
+  /** Present for callbacks on regular (non-inline) messages — our chat context. */
+  message?: { chat: { id: number }; message_thread_id?: number; message_id?: number };
 }
