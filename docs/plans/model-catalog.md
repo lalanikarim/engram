@@ -1,6 +1,6 @@
 # Model catalog — multi-provider model discovery & switching
 
-Status: **implemented** (branch `feature/model-catalog`, 2026-10-25 — unit 26/26, live api 58/58, telegram 18/18)
+Status: **implemented** (branch `feature/model-catalog`, 2026-10-25 — unit 26/26, live api 58/58, telegram 24/24)
 
 ## Goal
 
@@ -48,8 +48,13 @@ model is a durable, per-conversation choice with a configurable global default.
 9. **Roles** — optional `model` field per role in `roles.json`. Worker resolution:
    role's model > calling conversation's model (via `ToolExecutionApi.agent()`) > global default
    chain. Fixes the hardcoded `provider: "aurora"` in `extensions/subagents.ts`.
-10. **Telegram** — `/model` command on a bound conversation: no arg → current model + list of
-    available models; with arg (`<ref>`) → switch that conversation (same guard as the API).
+10. **Telegram** — interactive picker on a bound conversation:
+    - `/model` → inline keyboard with one button per provider that has available models
+    - click a provider → the message is edited to that provider's model buttons (+ back row);
+      falls back to a text list when refs would exceed Telegram's 64-byte callback limit
+    - click a model → durable switch (same overflow guard as the API); the picker message is
+      settled to a confirmation
+    - `/model <ref>` still works as a direct one-shot switch
 
 ## Non-goals
 

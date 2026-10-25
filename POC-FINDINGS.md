@@ -422,7 +422,10 @@ global pi config as the single source of truth.
 - **Roles**: optional per-role `model` in `roles.json`; worker chain is role model > parent
   conversation's model > global default. Fixed the hardcoded `provider: "aurora"` in
   `extensions/subagents.ts`.
-- **Telegram**: `/model` (list) and `/model <ref>` (switch this conversation).
+- **Telegram**: interactive picker — `/model` posts provider buttons; clicking a provider edits
+  the message to its model buttons (+ back); clicking a model durably switches the bound
+  conversation and settles the picker. `/model <ref>` remains as a direct one-shot switch.
+  Text-list fallback when refs exceed Telegram's 64-byte callback limit.
 
 Helper methods `listProviders()` / `listProviderModels()` expose the catalog per provider;
 exposed as `GET /providers` and `GET /providers/:id/models`.
@@ -430,7 +433,7 @@ exposed as `GET /providers` and `GET /providers/:id/models`.
 Verification: new unit suite `test/model-catalog.test.ts` — **26/26** (catalog building,
 credential resolution, ref parsing incl. ambiguity, default chain, provider listing, legacy
 discovery + id-conflict). Live api suite now **58/58** (was 48; +10 for catalog/providers/
-switch/reset/400s), telegram 18/18, `tsc --noEmit` clean.
+switch/reset/400s), telegram 24/24 (incl. the T6 picker flow), `tsc --noEmit` clean.
 
 ### Not yet done
 
