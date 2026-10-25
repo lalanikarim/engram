@@ -1,6 +1,6 @@
 # Model catalog — multi-provider model discovery & switching
 
-Status: **implemented** (branch `feature/model-catalog`, 2026-10-25 — unit 20/20, live api 55/55, telegram 18/18)
+Status: **implemented** (branch `feature/model-catalog`, 2026-10-25 — unit 26/26, live api 58/58, telegram 18/18)
 
 ## Goal
 
@@ -39,6 +39,8 @@ model is a durable, per-conversation choice with a configurable global default.
    - works on the root conversation too
 7. **API surface** —
    - `GET /models` → `{ models: [{provider, id, name, contextWindow}], default: "<ref>" }`
+   - `GET /providers` → all providers (built-in + custom-registered) with model counts + availability
+   - `GET /providers/:id/models` → all models of one provider (404 when unknown)
    - `GET /conversations` includes each conversation's current model ref
 8. **Context-window guard** — switching a conversation to a model whose `contextWindow` is
    smaller than ~90% of the current transcript estimate (chars/4 over visible messages) is

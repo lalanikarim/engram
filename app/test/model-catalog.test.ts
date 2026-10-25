@@ -6,7 +6,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { buildCatalog, defaultModelRef, formatModelRef, parseModelRef, type ModelsConfig } from "../src/model.ts";
+import {
+  buildCatalog,
+  defaultModelRef,
+  formatModelRef,
+  listProviderModels,
+  listProviders,
+  parseModelRef,
+  type ModelsConfig,
+} from "../src/model.ts";
 
 let passed = 0;
 let failed = 0;
@@ -126,6 +134,30 @@ async function main() {
     noSource = /no default model/.test(String(e));
   }
   check("no default and no local endpoint → clear error", noSource);
+
+  console.log("provider listing");
+  const providers = await listProviders(cfgNoDefault);
+  const byId = new Map(providers.map((p) => [p.id, p]));
+  check(
+    "listProviders includes custom + built-in providers",
+    byId.has("localbox") && byId.has("otherbox") && byId.has("opencode-go"),
+  );
+  check("provider availability reflects credentials", byId.get("localbox")?.available === true && byId.get("otherbox")?.available === false);
+  check("provider modelCount matches catalog", byId.get("localbox")?.modelCount === 2);
+  const localModels = await listProviderModels(cfgNoDefault, "localbox");
+  check(
+    "listProviderModels returns only that provider's models",
+    localModels.length === 2 && localModels.every((m) => m.provider === "localbox"),
+  );
+  let unknownProv = false;
+  try {
+    await listProviderModels(cfgNoDefault, "nope");
+  } catch (e) {
+    unknownProv = /unknown provider/.test(String(e));
+  }
+  check("listProviderModels rejects unknown provider", unknownProv);
+  const ogModels = await listProviderModels(cfgNoDefault, "opencode-go");
+  check("built-in provider models listed with availability", ogModels.some((m) => m.id === "qwen3.8-max" && m.available));
 
   console.log("legacy env endpoint discovery");
   // Tiny mock OpenAI-compatible /models endpoint.

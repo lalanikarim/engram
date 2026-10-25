@@ -328,22 +328,48 @@ export async function defaultModelRef(cfg: ModelsConfig): Promise<ModelRef> {
   throw new Error("no default model — set DEFAULT_MODEL=<provider>:<modelId> or OPENAI_BASE_URL");
 }
 
+/** One provider in the catalog (built-in or custom-registered). */
+export type ProviderInfo = {
+  id: string;
+  name: string;
+  modelCount: number;
+  /** True when at least one of its models has resolvable credentials. */
+  available: boolean;
+};
+
+/** All providers in the catalog, including custom-registered ones from models.json. */
+export async function listProviders(cfg: ModelsConfig): Promise<ProviderInfo[]> {
+  const available = new Set((await cfg.models.getAvailable()).map((m) => m.provider));
+  return cfg.models.getProviders().map((p) => ({
+    id: p.id,
+    name: p.name,
+    modelCount: cfg.models.getModels(p.id).length,
+    available: available.has(p.id),
+  }));
+}
+
+/** All chat models of one provider, with an availability flag from auth resolution. */
+export async function listProviderModels(cfg: ModelsConfig, providerId: string): Promise<CatalogModel[]> {
+  if (!cfg.models.getProvider(providerId)) {
+    throw new Error(
+      `unknown provider "${providerId}" — available: ${cfg.models.getProviders().map((p) => p.id).join(", ")}`,
+    );
+  }
+  const available = new Set((await cfg.models.getAvailable()).map((m) => `${m.provider}:${m.id}`));
+  return cfg.models.getModels(providerId).map((m) => ({
+    provider: providerId,
+    id: m.id,
+    name: m.name,
+    contextWindow: m.contextWindow,
+    available: available.has(`${providerId}:${m.id}`),
+  }));
+}
+
 /** All chat models in the catalog, with an availability flag from auth resolution. */
 export async function listCatalogModels(cfg: ModelsConfig): Promise<CatalogModel[]> {
-  const available = new Set(
-    (await cfg.models.getAvailable()).map((m) => `${m.provider}:${m.id}`),
-  );
   const out: CatalogModel[] = [];
   for (const p of cfg.models.getProviders()) {
-    for (const m of cfg.models.getModels(p.id)) {
-      out.push({
-        provider: p.id,
-        id: m.id,
-        name: m.name,
-        contextWindow: m.contextWindow,
-        available: available.has(`${p.id}:${m.id}`),
-      });
-    }
+    out.push(...(await listProviderModels(cfg, p.id)));
   }
   return out;
 }

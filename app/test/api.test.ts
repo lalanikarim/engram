@@ -340,6 +340,19 @@ async function main() {
   check("PATCH model:null resets to global default", resetP.status === 200 && resetP.json?.model === defRef);
   check("PATCH unknown ref → 400", (await api("PATCH", `/conversations/${mId}`, { model: "nope:nothing" })).status === 400);
   check("create with unknown ref → 400", (await api("POST", "/conversations", { model: "nope:nothing" })).status === 400);
+  const provRes = await api("GET", "/providers");
+  const provIds = ((provRes.json?.providers ?? []) as Array<{ id: string }>).map((p) => p.id);
+  check(
+    "GET /providers lists built-in + custom providers",
+    provRes.status === 200 && provIds.includes("opencode-go") && provIds.includes("aurora"),
+    JSON.stringify(provIds).slice(0, 200),
+  );
+  const auroraModels = await api("GET", "/providers/aurora/models");
+  check(
+    "GET /providers/:id/models lists that provider's models",
+    auroraModels.status === 200 && Array.isArray(auroraModels.json?.models) && (auroraModels.json.models as unknown[]).length > 0,
+  );
+  check("unknown provider → 404", (await api("GET", "/providers/nope/models")).status === 404);
 
   console.log("\n[5] web_fetch tool");
   const sub5 = await submit("Use the web_fetch tool to fetch https://example.com and tell me in one sentence what the page is about.", "t-web");

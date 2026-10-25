@@ -424,10 +424,13 @@ global pi config as the single source of truth.
   `extensions/subagents.ts`.
 - **Telegram**: `/model` (list) and `/model <ref>` (switch this conversation).
 
-Verification: new unit suite `test/model-catalog.test.ts` — **20/20** (catalog building,
-credential resolution, ref parsing incl. ambiguity, default chain, legacy discovery +
-id-conflict). Live api suite now **55/55** (was 48; +7 for catalog/switch/reset/400s), telegram
-18/18, `tsc --noEmit` clean.
+Helper methods `listProviders()` / `listProviderModels()` expose the catalog per provider;
+exposed as `GET /providers` and `GET /providers/:id/models`.
+
+Verification: new unit suite `test/model-catalog.test.ts` — **26/26** (catalog building,
+credential resolution, ref parsing incl. ambiguity, default chain, provider listing, legacy
+discovery + id-conflict). Live api suite now **58/58** (was 48; +10 for catalog/providers/
+switch/reset/400s), telegram 18/18, `tsc --noEmit` clean.
 
 ### Not yet done
 

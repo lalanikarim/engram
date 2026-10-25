@@ -4,6 +4,8 @@
 //   POST /tasks                   {content, requestId, conversationId?} → exactly-once submit
 //   GET  /stream?conversationId&cursor   SSE: durable entries (cursor-addressable) + lifecycle events
 //   GET  /models                  catalog: all provider models + availability + default ref
+//   GET  /providers               all providers (built-in + custom-registered)
+//   GET  /providers/:id/models    all models of one provider
 //   GET  /conversations           list all conversations (name, cwd, activity, model)
 //   POST /conversations           {cwd?, name?, model?} → new ownerless conversation with its own workspace
 //   PATCH /conversations/:id      {model?: "<provider>:<modelId>" | null} → durable per-conversation model switch
@@ -23,6 +25,8 @@ import {
   defaultModelRef,
   formatModelRef,
   listCatalogModels,
+  listProviderModels,
+  listProviders,
   parseModelRef,
   type ModelsConfig,
 } from "./model.ts";
@@ -207,6 +211,22 @@ export function createServer(deps: ServerDeps): http.Server {
         const models = await listCatalogModels(modelsConfig);
         const def = await defaultModelRef(modelsConfig);
         sendJson(res, 200, { models, default: formatModelRef(def) });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/providers") {
+        sendJson(res, 200, { providers: await listProviders(modelsConfig) });
+        return;
+      }
+
+      const providerModelsMatch = pathname.match(/^\/providers\/([^/]+)\/models$/);
+      if (req.method === "GET" && providerModelsMatch) {
+        try {
+          const models = await listProviderModels(modelsConfig, decodeURIComponent(providerModelsMatch[1]));
+          sendJson(res, 200, { provider: providerModelsMatch[1], models });
+        } catch (e) {
+          throw new HttpError(404, (e as Error).message);
+        }
         return;
       }
 
