@@ -13,6 +13,8 @@ export type RoleConfig = {
   tools: string[];
   /** Rendered as the worker conversation's instructions. */
   instructions?: string;
+  /** Optional model for this role ("<provider>:<modelId>"); unset = inherit/chain default. */
+  model?: string;
 };
 
 /** One declarative HTTP tool (app/tools.json). */

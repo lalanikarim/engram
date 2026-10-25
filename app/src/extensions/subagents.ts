@@ -2,11 +2,12 @@
 // worker conversation with role-restricted tools, plus a `delegate` tool for parallel fan-out.
 // Roles come from app/roles.json (name → tools + instructions).
 import { Type } from "@earendil-works/pi-ai";
-import type { ConversationId, TaskId } from "@earendil-works/pi-durable";
+import type { ConversationId, ModelRef, TaskId } from "@earendil-works/pi-durable";
 import { configure, defineExtension, defineTask, defineTool } from "@earendil-works/pi-durable";
 import type { RoleConfig } from "../config.ts";
+import { defaultModelRef, parseModelRef, type ModelsConfig } from "../model.ts";
 
-type WorkerInput = { role: string; prompt: string; modelId: string };
+type WorkerInput = { role: string; prompt: string; model: ModelRef };
 type WorkerState = { phase: "spawn" } | { phase: "wait"; convId: number };
 type WorkerResult = { answer: string };
 
@@ -16,7 +17,17 @@ function resolveRole(role: string, roles: RoleConfig[]) {
   return cfg;
 }
 
-export function subagentExtension(roles: RoleConfig[], modelId: string) {
+/**
+ * Resolve a worker's model: the role's own `model` (if declared), else the calling
+ * conversation's model, else the global default chain.
+ */
+async function resolveWorkerModel(cfg: ModelsConfig, roleCfg: RoleConfig, parentModel: ModelRef | undefined): Promise<ModelRef> {
+  if (roleCfg.model) return parseModelRef(cfg.models, roleCfg.model);
+  if (parentModel) return parentModel;
+  return defaultModelRef(cfg);
+}
+
+export function subagentExtension(roles: RoleConfig[], cfg: ModelsConfig) {
   const roleNames = roles.map((r) => r.name);
 
   const workerTask = defineTask<WorkerInput, WorkerState, WorkerResult>({
@@ -25,12 +36,12 @@ export function subagentExtension(roles: RoleConfig[], modelId: string) {
     initial: () => ({ phase: "spawn" }),
     phases: {
       spawn: async (task, runtime, ctx) => {
-        const cfg = resolveRole(task.input.role, roles);
+        const roleCfg = resolveRole(task.input.role, roles);
         // Resolve the role's tool names to registered tools from the current registry snapshot.
         const tools = runtime.registry
           .installed()
           .flatMap((e) => e.tools ?? [])
-          .filter((t) => cfg.tools.includes(t.name));
+          .filter((t) => roleCfg.tools.includes(t.name));
         // Assigned inside the commit callback; definite-assignment assertion — createConversation always yields an id.
         let convId!: number;
         await runtime.commit(async (tx) => {
@@ -38,10 +49,10 @@ export function subagentExtension(roles: RoleConfig[], modelId: string) {
             ownership: { kind: "task", taskId: task.id },
           });
           await configure(tx, rec.id, {
-            model: { provider: "aurora", modelId: task.input.modelId },
+            model: task.input.model,
             thinkingLevel: "medium",
             tools,
-            instructions: cfg.instructions,
+            instructions: roleCfg.instructions,
           });
           convId = rec.id;
           return undefined; // state transition happens in the next commit
@@ -108,13 +119,15 @@ export function subagentExtension(roles: RoleConfig[], modelId: string) {
     replay: "unsafe", // spawns child tasks; the harness tracks them durably
     execute: async (args: { jobs: Array<{ role: string; prompt: string }>; failFast?: boolean }, api, ctx) => {
       if (args.jobs.length === 0) throw new Error("jobs must not be empty");
+      // Worker model chain: role's own model > this conversation's model > global default.
+      const parentModel = (await api.agent(ctx)).model;
       const ids: TaskId<WorkerResult>[] = [];
       for (const job of args.jobs) {
-        resolveRole(job.role, roles); // fail fast on unknown role before spawning anything
+        const roleCfg = resolveRole(job.role, roles); // fail fast on unknown role before spawning anything
         ids.push(
           await api.createTask(
             workerTask,
-            { ...job, modelId },
+            { ...job, model: await resolveWorkerModel(cfg, roleCfg, parentModel) },
             { ownership: { kind: "task", taskId: api.taskId } },
             ctx,
           ),

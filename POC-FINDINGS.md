@@ -395,8 +395,46 @@ Verification (all acceptance criteria from the issue):
 - `PI_MODEL_ID` override verified (skips discovery).
 - App: `tsc --noEmit` clean, api suite 48/48.
 
+### Multi-provider model catalog ✅ COMPLETE (2026-10-25, `feature/model-catalog`)
+
+Spec: [`docs/plans/model-catalog.md`](docs/plans/model-catalog.md). The app can now discover
+and switch models across **all pi-supported providers plus custom models**, reusing the
+global pi config as the single source of truth.
+
+- **Catalog** (`src/model.ts` rewrite): all built-in pi-ai providers registered via
+  `builtinProviders()`; custom providers loaded from `~/.pi/agent/models.json` (pi's format —
+  e.g. the local Unsloth hosts `spark`/`aurora`); stream dispatch per model `api` string via
+  `getApiProvider()` (same pattern pi's own provider composer uses). Legacy env-driven
+  OpenAI-compatible endpoint kept as back-compat; a `models.json` entry wins on provider-id
+  conflict, and discovery still feeds the default-model fallback.
+- **Credentials**: small read-only `CredentialStore` over `~/.pi/agent/auth.json` (no key
+  duplication — opencode-go's key resolves from there at request time). `PI_AGENT_DIR`
+  overrides the config dir for tests/containers. Unset `$ENV` keys degrade to "provider
+  unavailable", not a load error.
+- **Model refs**: canonical `<provider>:<modelId>` (first-colon split — model ids may contain
+  `/`); bare ids resolve when unique, rejected as ambiguous otherwise.
+- **Global default**: `DEFAULT_MODEL=<provider>:<modelId>` env var; unset → loaded model on the
+  local endpoint (previous behavior). No provider is preferred out of the box.
+- **Per-conversation model** (durable, survives restarts): `POST /conversations {model}` at
+  creation; `PATCH /conversations/:id {model | null}` via pi-durable `configure()`; shown in
+  `GET /conversations`; `GET /models` exposes the catalog + default. Context-window overflow
+  guard rejects switching a long transcript onto a smaller window (409, compact-first hint).
+- **Roles**: optional per-role `model` in `roles.json`; worker chain is role model > parent
+  conversation's model > global default. Fixed the hardcoded `provider: "aurora"` in
+  `extensions/subagents.ts`.
+- **Telegram**: `/model` (list) and `/model <ref>` (switch this conversation).
+
+Helper methods `listProviders()` / `listProviderModels()` expose the catalog per provider;
+exposed as `GET /providers` and `GET /providers/:id/models`.
+
+Verification: new unit suite `test/model-catalog.test.ts` — **26/26** (catalog building,
+credential resolution, ref parsing incl. ambiguity, default chain, provider listing, legacy
+discovery + id-conflict). Live api suite now **58/58** (was 48; +10 for catalog/providers/
+switch/reset/400s), telegram 18/18, `tsc --noEmit` clean.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
 container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
-host firewall rules). Everything else in PLAN §4 is complete.
+host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
+Everything else in PLAN §4 is complete.

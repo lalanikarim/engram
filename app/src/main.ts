@@ -2,14 +2,14 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Harness, type EnvTarget, type ModelRef } from "@earendil-works/pi-durable";
+import { Harness, type EnvTarget } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
 import { ConversationMeta } from "./meta.ts";
-import { loadModelConfig, localModels, modelId, providerId } from "./model.ts";
+import { defaultModelRef, formatModelRef, loadModelsConfig } from "./model.ts";
 import { buildRegistry, ROOT_INSTRUCTIONS } from "./registry.ts";
 import { createServer } from "./server.ts";
 import { SandboxManager } from "./sandbox.ts";
@@ -24,13 +24,12 @@ async function main() {
   mkdirSync(config.workRoot, { recursive: true });
   mkdirSync(config.kbDir, { recursive: true });
 
-  console.log(`[engram] discovering local model at ${process.env.OPENAI_BASE_URL} …`);
-  const discovered = await loadModelConfig();
-  const models = await localModels();
-  const id = await modelId();
-  console.log(`[engram] model: ${id} (window ${discovered.models[0].contextWindow})`);
+  console.log(`[engram] building model catalog (agent dir ${process.env.PI_AGENT_DIR ?? "~/.pi/agent"}) …`);
+  const modelsConfig = await loadModelsConfig();
+  const defaultRef = await defaultModelRef(modelsConfig);
+  console.log(`[engram] default model: ${formatModelRef(defaultRef)}`);
 
-  const registry = buildRegistry(config, id);
+  const registry = buildRegistry(config, modelsConfig);
   const dbPath = path.join(config.dataDir, "agent.sqlite");
 
   // Per-conversation execution environment: the conversation's agent cwd maps into the work root.
@@ -52,7 +51,7 @@ async function main() {
   const harness = await Harness.open(
     await openNodeSqliteStorage(dbPath),
     {
-      models,
+      models: modelsConfig.models,
       registry,
       env: envFor,
       settings: {
@@ -80,10 +79,9 @@ async function main() {
     console.error("[engram] sandbox orphan sweep failed:", (e as Error).message);
   }
 
-  const modelRef: ModelRef = { provider: await providerId(), modelId: id };
   const root = await harness.root(ctx, {
     agent: {
-      model: modelRef,
+      model: defaultRef,
       thinkingLevel: "medium",
       instructions: ROOT_INSTRUCTIONS,
     },
@@ -95,7 +93,7 @@ async function main() {
     },
   });
 
-  const server = createServer({ harness, root, config, modelRef });
+  const server = createServer({ harness, root, config, modelsConfig });
   server.listen(config.port, config.host, () => {
     console.log(`[engram] ready — API on http://${config.host}:${config.port} (conversation ${root.id})`);
   });

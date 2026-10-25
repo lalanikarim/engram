@@ -348,6 +348,13 @@ export class TelegramClient {
       return;
     }
 
+    // /model command: show the model catalog or switch this conversation's model.
+    const modelCmd = text.match(/^\/model(?:\s+(.+))?$/s);
+    if (modelCmd) {
+      await this.handleModelCommand(msg.chat.id, msg.message_thread_id, modelCmd[1]?.trim());
+      return;
+    }
+
     const key = chatKey(msg.chat.id, msg.message_thread_id);
     let binding = this.state.chats[key];
     if (!binding) {
@@ -500,14 +507,47 @@ export class TelegramClient {
   }
 
   private async apiPost(p: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.apiRequest("POST", p, body);
+  }
+
+  private async apiRequest(method: string, p: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
     const res = await fetch(`${this.opts.apiBaseUrl}${p}`, {
-      method: "POST",
+      method,
       headers: { authorization: `Bearer ${this.opts.apiToken}`, "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: body ? JSON.stringify(body) : undefined,
     });
     const json = (await res.json()) as Record<string, unknown>;
     if (!res.ok) throw new Error(`api ${p}: ${res.status} ${JSON.stringify(json)}`);
     return json;
+  }
+
+  // ---- /model command ----
+
+  private async handleModelCommand(chatId: number, threadId: number | undefined, arg?: string): Promise<void> {
+    const target = { chat_id: chatId, ...(threadId ? { message_thread_id: threadId } : {}) };
+    const key = chatKey(chatId, threadId);
+    const binding = this.state.chats[key];
+    if (!binding) {
+      await this.tg("sendMessage", { ...target, text: "This chat isn't bound yet — send me a task first." }).catch(() => {});
+      return;
+    }
+    try {
+      if (!arg) {
+        const body = await this.apiRequest("GET", "/models");
+        const models = (body.models ?? []) as Array<{ provider: string; id: string; available: boolean }>;
+        const def = String(body.default ?? "");
+        const lines = models
+          .filter((m) => m.available)
+          .map((m) => `${m.provider}:${m.id}${`${m.provider}:${m.id}` === def ? " (default)" : ""}`);
+        const list = lines.length > 0 ? lines.join("\n") : "(no available models)";
+        await this.tg("sendMessage", { ...target, text: `Available models — /model <provider>:<modelId> to switch:\n${list}` }).catch(() => {});
+      } else {
+        const body = await this.apiRequest("PATCH", `/conversations/${binding.conversationId}`, { model: arg });
+        await this.tg("sendMessage", { ...target, text: `Model switched to ${String(body.model)}.` }).catch(() => {});
+      }
+    } catch (e) {
+      await this.tg("sendMessage", { ...target, text: `model command failed: ${String(e instanceof Error ? e.message : e)}` }).catch(() => {});
+    }
   }
 }
 

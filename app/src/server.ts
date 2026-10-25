@@ -3,8 +3,12 @@
 //   GET  /ready                   readiness (true once the harness is open + resumed)
 //   POST /tasks                   {content, requestId, conversationId?} → exactly-once submit
 //   GET  /stream?conversationId&cursor   SSE: durable entries (cursor-addressable) + lifecycle events
-//   GET  /conversations           list all conversations (name, cwd, activity)
-//   POST /conversations           {cwd?, name?} → new ownerless conversation with its own workspace
+//   GET  /models                  catalog: all provider models + availability + default ref
+//   GET  /providers               all providers (built-in + custom-registered)
+//   GET  /providers/:id/models    all models of one provider
+//   GET  /conversations           list all conversations (name, cwd, activity, model)
+//   POST /conversations           {cwd?, name?, model?} → new ownerless conversation with its own workspace
+//   PATCH /conversations/:id      {model?: "<provider>:<modelId>" | null} → durable per-conversation model switch
 //   POST /steer                   {content, requestId, conversationId?} → steer a running conversation
 //   GET  /approvals               pending approval requests (discovered from transcript markers)
 //   POST /approvals/:key          {decision: "approved"|"denied"} → durable decision
@@ -17,6 +21,15 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Conversation, ConversationId, EntryRecord, EntryId, Harness, ModelRef } from "@earendil-works/pi-durable";
 import { AgentDoc, watchEvents } from "@earendil-works/pi-durable";
 import type { AppConfig } from "./config.ts";
+import {
+  defaultModelRef,
+  formatModelRef,
+  listCatalogModels,
+  listProviderModels,
+  listProviders,
+  parseModelRef,
+  type ModelsConfig,
+} from "./model.ts";
 import { ApprovalDoc, parseApprovalMarker } from "./extensions/approvals.ts";
 import { ConversationMeta } from "./meta.ts";
 
@@ -58,8 +71,42 @@ export interface ServerDeps {
   harness: Harness;
   root: Conversation;
   config: AppConfig;
-  /** Deployment default model for newly created conversations. */
-  modelRef: ModelRef;
+  /** Multi-provider catalog + global default (DEFAULT_MODEL / local fallback). */
+  modelsConfig: ModelsConfig;
+}
+
+/** Route-level error with an HTTP status (bad model refs → 400, overflow guard → 409). */
+class HttpError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Parse a request's `model` field; undefined passes through (use the default chain). */
+function resolveModelParam(modelsConfig: ModelsConfig, model: unknown): ModelRef | undefined {
+  if (model === undefined) return undefined;
+  if (typeof model !== "string" || model.trim() === "") {
+    throw new HttpError(400, 'model must be a non-empty "<provider>:<modelId>" string');
+  }
+  try {
+    return parseModelRef(modelsConfig.models, model);
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
+}
+
+/** Rough transcript size in tokens (chars/4 over the visible model context). */
+async function estimateTranscriptTokens(conv: Conversation): Promise<number> {
+  const view = await conv.context(ctx);
+  let chars = 0;
+  for (const m of view.messages) {
+    const c = m.content;
+    if (typeof c === "string") chars += c.length;
+    else if (Array.isArray(c)) for (const part of c) if (part.type === "text") chars += part.text.length;
+  }
+  return Math.ceil(chars / 4);
 }
 
 function authorized(req: http.IncomingMessage, token: string): boolean {
@@ -131,7 +178,7 @@ function entrySummary(e: EntryRecord) {
 }
 
 export function createServer(deps: ServerDeps): http.Server {
-  const { harness, root, config, modelRef } = deps;
+  const { harness, root, config, modelsConfig } = deps;
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -157,6 +204,29 @@ export function createServer(deps: ServerDeps): http.Server {
       }
       if (req.method === "GET" && pathname === "/ready") {
         sendJson(res, 200, { ready: true });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/models") {
+        const models = await listCatalogModels(modelsConfig);
+        const def = await defaultModelRef(modelsConfig);
+        sendJson(res, 200, { models, default: formatModelRef(def) });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/providers") {
+        sendJson(res, 200, { providers: await listProviders(modelsConfig) });
+        return;
+      }
+
+      const providerModelsMatch = pathname.match(/^\/providers\/([^/]+)\/models$/);
+      if (req.method === "GET" && providerModelsMatch) {
+        try {
+          const models = await listProviderModels(modelsConfig, decodeURIComponent(providerModelsMatch[1]));
+          sendJson(res, 200, { provider: providerModelsMatch[1], models });
+        } catch (e) {
+          throw new HttpError(404, (e as Error).message);
+        }
         return;
       }
 
@@ -207,11 +277,12 @@ export function createServer(deps: ServerDeps): http.Server {
           cwd: string | null;
           sandbox: boolean;
           createdAt: number | null;
+          model: string | null;
           openSubmissions: number;
         };
         const list = await harness.commit(async (tx) => {
           const page = await tx.scanConversations({ order: "descending" }, 100);
-          const out: Array<Omit<ConvSummary, "name" | "cwd" | "sandbox" | "createdAt" | "openSubmissions">> = [];
+          const out: Array<Omit<ConvSummary, "name" | "cwd" | "sandbox" | "createdAt" | "model" | "openSubmissions">> = [];
           for (const c of page.items) {
             const last = await tx.scanEntries({ conversationId: c.id, order: "descending" }, 1);
             out.push({
@@ -244,6 +315,7 @@ export function createServer(deps: ServerDeps): http.Server {
             cwd: agentState?.cwd ?? null,
             sandbox: meta?.sandbox === true,
             createdAt: meta?.createdAt || null,
+            model: agentState?.model ? formatModelRef(agentState.model) : null,
             openSubmissions: open.get(item.id) ?? 0,
           });
         }
@@ -256,6 +328,7 @@ export function createServer(deps: ServerDeps): http.Server {
         const cwd = typeof body.cwd === "string" ? sanitizeCwd(body.cwd) : undefined;
         const sandboxed = body.sandbox === true;
         const name = typeof body.name === "string" && body.name.trim() ? body.name.trim().slice(0, 120) : undefined;
+        const model = resolveModelParam(modelsConfig, body.model);
         if (cwd === null) {
           sendJson(res, 400, { error: 'cwd must be a relative directory without ".."' });
           return;
@@ -263,7 +336,7 @@ export function createServer(deps: ServerDeps): http.Server {
         const conv = await harness.createConversation(
           {
             ownership: { kind: "ownerless" },
-            agent: { cwd, model: modelRef, thinkingLevel: "medium" },
+            agent: { cwd, model: model ?? (await defaultModelRef(modelsConfig)), thinkingLevel: "medium" },
             init: async (tx, conversationId) => {
               const d = await tx.doc(ConversationMeta, conversationId);
               d.name = name ?? (cwd ? `project-${cwd}` : `conversation-${conversationId}`);
@@ -274,7 +347,45 @@ export function createServer(deps: ServerDeps): http.Server {
           },
           ctx,
         );
-        sendJson(res, 201, { id: conv.id, cwd: cwd ?? null, name: name ?? null, sandbox: sandboxed });
+        sendJson(res, 201, {
+          id: conv.id,
+          cwd: cwd ?? null,
+          name: name ?? null,
+          sandbox: sandboxed,
+          model: formatModelRef(model ?? (await defaultModelRef(modelsConfig))),
+        });
+        return;
+      }
+
+      // Durable per-conversation model switch. `model: null` resets to the global default.
+      const patchMatch = pathname.match(/^\/conversations\/(\d+)$/);
+      if (req.method === "PATCH" && patchMatch) {
+        const convId = Number(patchMatch[1]);
+        const conv = await harness.conversation(cid(convId), ctx);
+        if (!conv) {
+          sendJson(res, 404, { error: `conversation ${convId} not found` });
+          return;
+        }
+        const body = await readJsonBody(req);
+        let target: ModelRef;
+        if (body.model === null || body.model === undefined) {
+          target = await defaultModelRef(modelsConfig);
+        } else {
+          target = resolveModelParam(modelsConfig, body.model)!;
+        }
+        // Overflow guard: don't move a long transcript onto a smaller context window.
+        const modelEntry = modelsConfig.models.getModel(target.provider, target.modelId);
+        if (modelEntry) {
+          const est = await estimateTranscriptTokens(conv);
+          if (est > modelEntry.contextWindow * 0.9) {
+            throw new HttpError(
+              409,
+              `transcript is ~${est} tokens; ${formatModelRef(target)} has a ${modelEntry.contextWindow}-token window — compact the conversation first`,
+            );
+          }
+        }
+        await conv.configure({ model: target }, ctx);
+        sendJson(res, 200, { id: convId, model: formatModelRef(target) });
         return;
       }
 
@@ -329,7 +440,7 @@ export function createServer(deps: ServerDeps): http.Server {
           const conv = await harness.createConversation(
             {
               ownership: { kind: "ownerless" },
-              agent: { model: modelRef, thinkingLevel: "medium" },
+              agent: { model: await defaultModelRef(modelsConfig), thinkingLevel: "medium" },
               init: async (tx, conversationId) => {
                 const d = await tx.doc(ConversationMeta, conversationId);
                 d.name = name ?? `conversation-${conversationId}`;
@@ -413,7 +524,10 @@ export function createServer(deps: ServerDeps): http.Server {
       sendJson(res, 404, { error: "not found" });
     } catch (err) {
       const msg = String(err instanceof Error ? err.message : err);
-      if (!res.headersSent) sendJson(res, msg === "invalid JSON body" || msg === "body too large" ? 400 : 500, { error: msg });
+      if (!res.headersSent) {
+        const status = err instanceof HttpError ? err.status : msg === "invalid JSON body" || msg === "body too large" ? 400 : 500;
+        sendJson(res, status, { error: msg });
+      }
     }
   });
 

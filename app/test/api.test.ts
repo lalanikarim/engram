@@ -6,6 +6,7 @@
 //   2. task submit → SSE stream → answer
 //   3. exactly-once requestId
 //   4. conversations: create with cwd; per-conversation workspace on disk
+//   4b. model catalog: GET /models, create/switch/reset per-conversation model
 //   5. web_fetch tool
 //   6. kb_search tool
 //   7. approval flow: block → GET /approvals → approve → retry → executed once
@@ -318,6 +319,40 @@ async function main() {
   const helloPath = path.join(dirs.work, "proj-a", "hello.txt");
   check("file written to project workspace", existsSync(helloPath) && readFileSync(helloPath, "utf8").includes("hi from project"));
   projStream.close();
+
+  console.log("\n[4b] model catalog + per-conversation switching");
+  const modelsRes = await api("GET", "/models");
+  check(
+    "GET /models lists catalog + default ref",
+    modelsRes.status === 200 && Array.isArray(modelsRes.json?.models) && typeof modelsRes.json?.default === "string",
+    JSON.stringify(modelsRes.json).slice(0, 200),
+  );
+  const defRef = String(modelsRes.json?.default ?? "");
+  const withModel = await api("POST", "/conversations", { cwd: "proj-m", name: "Model Test", model: defRef });
+  check("create with explicit model → 201 + model echoed", withModel.status === 201 && withModel.json?.model === defRef);
+  const mId = withModel.json.id as number;
+  const listM = await api("GET", "/conversations");
+  const mineM = (listM.json?.conversations ?? []).find((c: any) => c.id === mId);
+  check("conversation listed with its model", mineM?.model === defRef);
+  const patched = await api("PATCH", `/conversations/${mId}`, { model: defRef });
+  check("PATCH switch → 200 + model", patched.status === 200 && patched.json?.model === defRef);
+  const resetP = await api("PATCH", `/conversations/${mId}`, { model: null });
+  check("PATCH model:null resets to global default", resetP.status === 200 && resetP.json?.model === defRef);
+  check("PATCH unknown ref → 400", (await api("PATCH", `/conversations/${mId}`, { model: "nope:nothing" })).status === 400);
+  check("create with unknown ref → 400", (await api("POST", "/conversations", { model: "nope:nothing" })).status === 400);
+  const provRes = await api("GET", "/providers");
+  const provIds = ((provRes.json?.providers ?? []) as Array<{ id: string }>).map((p) => p.id);
+  check(
+    "GET /providers lists built-in + custom providers",
+    provRes.status === 200 && provIds.includes("opencode-go") && provIds.includes("aurora"),
+    JSON.stringify(provIds).slice(0, 200),
+  );
+  const auroraModels = await api("GET", "/providers/aurora/models");
+  check(
+    "GET /providers/:id/models lists that provider's models",
+    auroraModels.status === 200 && Array.isArray(auroraModels.json?.models) && (auroraModels.json.models as unknown[]).length > 0,
+  );
+  check("unknown provider → 404", (await api("GET", "/providers/nope/models")).status === 404);
 
   console.log("\n[5] web_fetch tool");
   const sub5 = await submit("Use the web_fetch tool to fetch https://example.com and tell me in one sentence what the page is about.", "t-web");
