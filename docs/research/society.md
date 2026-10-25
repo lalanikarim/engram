@@ -143,3 +143,10 @@ kill-switches, multi-human governance.
 3. **Sequencing** — B after A proves out; layer grants/charter → self-initiation → safety → multi-human → scale. OK?
 4. **Scale target** — how many concurrent agents / boxes before B beats "a bigger A"? (bounded by local-model capacity)
 5. **In scope now?** — B as a research track; build after A. Confirm.
+
+## Decision log (2026-10-25)
+
+- **Trust model:** **CONFIRMED** — tiered clearance + per-capability grants (TTL, human-approved promotion); auto-reputation deferred to a signal-only evaluation.
+- **Autonomy boundary:** **CONFIRMED** — self-initiation = proposals within scope; external side effects always gated by the human approval boundary.
+- **Sequencing / scope:** **CONFIRMED** — B remains a research track, designed to be built after A proves out; layering order: grants/charter → self-initiation → safety → multi-human → scale.
+- **Open (still to resolve):** scale target; multi-human scope; per-capability grant granularity; charter content defaults. These feed the next research pass.
