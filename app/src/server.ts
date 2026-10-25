@@ -571,6 +571,54 @@ export function createServer(deps: ServerDeps): http.Server {
         return;
       }
 
+      // Batch decision (phase 4): N pending keys → one commit, per-key durable decisions.
+      // Destructive-tier items are never batchable — they must be approved individually.
+      if (req.method === "POST" && pathname === "/approvals/batch") {
+        const body = await readJsonBody(req);
+        const keys = Array.isArray(body.keys)
+          ? [...new Set(body.keys.filter((k): k is string => typeof k === "string" && /^[a-f0-9]{12}$/.test(k)))]
+          : [];
+        if (keys.length === 0 || keys.length > 50) {
+          sendJson(res, 400, { error: 'body must be {keys: string[1..50], decision: "approved" | "denied"[, reason?: string]}' });
+          return;
+        }
+        const decision = body.decision;
+        if (decision !== "approved" && decision !== "denied") {
+          sendJson(res, 400, { error: 'decision must be "approved" or "denied"' });
+          return;
+        }
+        const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 500) : null;
+        const pending = await pendingApprovals(harness);
+        const byKey = new Map(pending.map((a) => [a.key as string, a]));
+        const destructiveKeys = keys.filter((k) => byKey.get(k)?.tier === "destructive");
+        if (destructiveKeys.length > 0) {
+          sendJson(res, 400, { error: "destructive actions must be approved individually", keys: destructiveKeys });
+          return;
+        }
+        const results = await harness.commit(async (tx) => {
+          const out: Array<{ key: string; status: string }> = [];
+          for (const key of keys) {
+            if (!byKey.has(key)) {
+              out.push({ key, status: "not_found" }); // unknown key — do not create a phantom decision
+              continue;
+            }
+            const d = await tx.doc(ApprovalDoc, key, {});
+            if (d.decision !== "pending") {
+              out.push({ key, status: `already_${d.decision}` });
+              continue;
+            }
+            d.decision = decision;
+            d.decidedBy = "api";
+            d.decidedAt = Date.now();
+            if (reason) d.reason = reason;
+            out.push({ key, status: "decided" });
+          }
+          return out;
+        }, ctx);
+        sendJson(res, 200, { decision, results });
+        return;
+      }
+
       const approvalKeyMatch = pathname.match(/^\/approvals\/([a-f0-9]{12})$/);
       if (req.method === "GET" && approvalKeyMatch) {
         // Decision state for one approval key (404 until a decision is recorded).

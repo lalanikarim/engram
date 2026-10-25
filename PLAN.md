@@ -129,7 +129,7 @@ Threats: (a) network attackers reaching the agent, (b) prompt injection via untr
 ## 6. Roadmap after MVP (from C2/E4)
 
 Detailed plans for in-flight/next items live in [`docs/plans/`](docs/plans/) (model catalog — done;
-smarter approvals — phase 1 done, phases 2–4 next).
+smarter approvals — phases 1–3 done, phase 4 next — batching).
 
 - **Smarter approvals** — risk-tiered gating (`gates.json`), destructive-action guard that always
   wins, persistent global allow-rules, rich prompts with denial reasons, 24 h TTL. Plan:

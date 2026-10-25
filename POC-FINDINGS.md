@@ -483,11 +483,25 @@ rule id, rule stored recipient-scoped, second send to same recipient passes with
 destructive alwaysAllow rejected 400, delete + relist). Telegram now **28/28** (T7: button →
 settle "APPROVED + always allowed" → persisted rule). `tsc --noEmit` clean.
 
+### Smarter approvals — phase 3 ✅ COMPLETE (2026-10-25, `feature/approvals-phase3`)
+
+TTL auto-deny (spec §D): pending approvals past `APPROVAL_TTL_HOURS` (default 24) durably
+auto-deny (`decidedBy: "ttl"`) and the owning conversation is notified.
+
+- Config: `approvalTtlHours` from `APPROVAL_TTL_HOURS` (default 24, invalid → 24).
+- Hook: `isApprovalExpired(pendingSince, now, ttlMs)`; hard-stops when the durable decision
+  is already `denied` (human or TTL).
+- Server: `sweepExpiredApprovals()` — initial pass + interval sweep; denies expired pending
+  items; notifies owner conversation (requestId-keyed, exactly-once). `GET /approvals` sweeps
+  first; new `GET /approvals/:key` for decision state.
+
+Verification: unit TTL checks in `approval-rules.test.ts` (18/18); live api `[7d]` all pass
+(blocked → lapsed → gone from list → durable `ttl` denial → notified).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
 container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
 host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
-Next planned work: smarter approvals phases 3–4 (`docs/plans/approvals.md`; phases 1–2 — risk
-tiers + destructive guard + rich prompts/denial reasons + persistent allow-rules — are done).
+Next planned work: smarter approvals phase 4 (batching) — phases 1–3 done.
 Everything else in PLAN §4 is complete.
