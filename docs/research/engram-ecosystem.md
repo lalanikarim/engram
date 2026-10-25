@@ -69,7 +69,8 @@ a thin, shared layer on top of the core:
   status/answer (reuses `submit`/`requestId`/`watch`; the current `send_message` stub is the seam).
 
 This shared layer is effectively **"Project 0"** — the composable core. A and B are then two
-different *policies* over the same instance+board substrate (§6).
+different *policies* over the same instance+board substrate (§6). The board itself is designed
+in its own thread: [board.md](board.md).
 
 ---
 
@@ -278,7 +279,8 @@ for B, on A's pieces. Nothing here commits engram to one direction yet.
 
 1. Confirm the **three-way framing** (P0 shared core → A → B) and that A is "B's bounded special case."
 2. Decide the **member model** for A: named conversation in one harness vs. separate instance/box.
-3. Define the **board schema** minimally (discovery / tasks / requests / statuses) — this unblocks P0.
+3. Define the **board schema** minimally (discovery / tasks / requests / statuses) — this unblocks
+   P0. See [board.md](board.md) for the component breakdown + data-model sketch.
 4. Set the **A autonomy boundary** (may members initiate peer work, or only on human-posted tasks?).
 5. Agree the **peer trust model** for A (static named allowlist?) and containment of a bad member.
 6. Name the projects (working names: "Collective" / "Society"; tentative).

@@ -1,0 +1,193 @@
+# The Board — central coordination artifact (research / brainstorming)
+
+**Status:** research / brainstorming. Part of the [engram-ecosystem](engram-ecosystem.md) thread.
+The board is the **Project 0** artifact: the shared substrate both **Option A (Collective)** and
+**Option B (Society)** build on. Nothing here is committed; it refines the rough list from the
+working session into a concrete, durable data model grounded in pi-durable primitives.
+
+## Core principle — what the board is and isn't
+
+**The board is durable state + routing, not a new engine.** It is built entirely from primitives
+engram already has: `documents` (durable app state changed atomically with the transcript),
+`submissions` (exactly-once work requests), `conversations` (durable, multiplayer, streamable),
+`watch`/`watchEvents` (live deltas), and background `tasks` with timers.
+
+Two consequences:
+- **Don't rebuild chat.** A forum channel and a DM are *conversations* (pi-durable conversations
+  already support late-join from full state, multiplayer steering, and streams). The board's job
+  for communication is the **directory/routing layer** — which conversation to join, who's allowed —
+  not a bespoke message store.
+- **Everything is crash-safe & exactly-once by construction.** A job claim, a status change, or a
+  knowledge post is an atomic commit; no two actors can double-claim, and restarts never lose or
+  duplicate state.
+
+The board's real value is the **directory + work-tracking + trust layer** on top of those primitives:
+who/what exists, what work is open, who did what, and what each party is allowed to do.
+
+---
+
+## Components (refined from the working-session list)
+
+### 1. Engram registry & agent profiles
+Auto-registration of an engram with a durable profile:
+- `id`, `name`, `kind` (role), `capabilities[]`, `restrictions[]`, `skills[]`, `boundaries`
+  (what it may/may not do), `trustLevel`, `status` (idle/busy/offline), `endpoint`/address,
+  `currentFocus`, `createdAt`.
+- **pi-durable mapping:** a document family (`board.engram`, one doc per engram id). Changed in
+  atomic commits; watchable for live "who's here + what they can do."
+- **Security note:** registration is an **authorization surface**. In A, profiles are
+  human-vetted and static. In B, registration may be dynamic and needs vetting/revocation.
+
+### 2. Human profile(s)
+- `id`, `name`, `roles[]`, `permissions` (what they can assign/approve/configure), `prefs`,
+  `channels` (where to reach them: Telegram, Web UI, email).
+- **Mapping:** document family (`board.human`). A keeps exactly one human (the operator/approver);
+  B anticipates multiple humans as a governance layer (deferred).
+
+### 3. Jobs / work items (the work queue)
+A job is a tracked unit of work, richer than a raw submission:
+- `id`, `title`, `body`, `requester {type: human|engram, id}`, `assignee {type,id} | null`
+  (null = open for pickup), `status` (open → claimed → in-progress → blocked/done/failed/cancelled),
+  `priority`, `due?`, `artifacts[]`, `result?`, timestamps.
+- **Mapping:** a job **record** is a document (`board.job`); the actual execution is an **owned
+  conversation/task** of the claiming engram. The board tracks the record; the work happens in the
+  engram's own context (so it uses *its* memory — the whole point of a collective vs. subagents).
+- **Claim semantics:** claiming is an **atomic commit** — read the job, and only if `status == open`
+  set `assignee = self`, `status = claimed`; otherwise another actor won and you move to the next
+  open job. pi-durable's single-writer + atomic commits make double-claim impossible *within one
+  harness*. (Across separate instances this needs a shared store or a coordination authority — see
+  open questions.)
+
+### 4. Communication bus — forum + peer/direct
+- **Forum/shared:** a channel any member of can post in and read (late-join, full history).
+- **Peer/direct:** a 1:1 between two parties.
+- **Mapping:** both are **conversations**. The board stores a lightweight `board.channel` directory:
+  channel id → underlying conversation id + members + purpose. Routing ("talk to X" / "join the
+  deploy channel") resolves against this directory.
+- **Cross-instance nuance:** in-harness, a DM/forum is just a shared conversation. Across separate
+  instances (different storage) there is no shared conversation — peer messages become either a
+  message document on a shared board or a `POST /tasks` to the peer instance (the cross-instance
+  delegation tool). This is the in-harness-vs-multi-instance decision made concrete.
+
+### 5. Knowledge exchange (request & share, human ↔ engram ↔ engram)
+- A durable place where knowledge is **published and queried**, with **provenance + trust tier**:
+  `id`, `title`, `body`, `author {type,id}`, `source` (human / engram / web), `trustTier`,
+  `createdAt`. Searchable (ripgrep now; local embeddings later per PLAN §6).
+- **Mapping:** document family (`board.knowledge`) or an elevated `/kb` with metadata.
+- **Security note (critical):** knowledge posted by an engram or fetched from the web is
+  **untrusted input**. It must carry provenance + trust tier and be treated as *data, never
+  instructions* — the same discipline engram already applies to web/email content. This prevents a
+  compromised/malicious member from injecting "instructions" via a knowledge post.
+
+### 6. Approvals / requests-to-human (action-requiring)
+- Distinct from chat: a **request** that needs a human decision (approve an external side effect,
+  answer a question, unblock a job). Trackable, with a durable outcome.
+- **Mapping:** reuse the existing `ApprovalDoc` pattern (`beforeTool` hook + memo); the board
+  surfaces pending requests and records decisions. This keeps "the human is the control boundary"
+  first-class on the board rather than buried in chat.
+
+### 7. Identity, trust & authorization (the layer A and B diverge on most)
+- Who may post/assign/claim/approve/configure; how much autonomy an engram has; how trust is
+  granted, raised, or revoked.
+- **A:** static, human-vetted named allowlist + per-member boundaries from the profile.
+- **B:** dynamic trust/reputation/provenance + a governance/charter policy layer.
+- This is the component that most stresses engram's #1 constraint (no loss of control).
+
+### 8. Status & observability
+- Live status of engrams and jobs; per-engram/per-job usage/cost; dashboards.
+- **Mapping:** native — `watch`/`documentState().subscribe()`/`viewState()` over the board docs +
+  `pi.usage`. Read-only clients (PLAN §6 dashboards).
+
+### 9. Scheduling & timers
+- Recurring jobs, deadlines, reminders ("verify X daily").
+- **Mapping:** native — background tasks with restart-surviving timers + cron submissions
+  (`requestId = job-<date>`), results delivered to the human's channels. The board lists scheduled
+  work and its next fire time.
+
+### 10. Budgets & cost
+- Per-engram/per-job spend caps; relevant under "no cloud spend" + finite local-model capacity.
+- **Mapping:** native `pi.usage` tracking surfaced on the board; a policy layer enforces caps
+  (connects to the smarter-approvals work in `docs/plans/approvals.md`).
+
+### 11. Audit / provenance log
+- Append-only record of jobs, messages, decisions, and tool calls — for accountability and
+  crash-safety.
+- **Mapping:** largely free — the transcript + documents are already an append-only, durable record;
+  the board just exposes it per job/member.
+
+### Tool registry (the "???" item) — keep it thin
+A board-level tool registry would catalog shared/external tools and **permission** which engram may
+call which. Recommendation: **do not build this in P0.** Real tool control already lives in the
+per-instance malleable registry + approval gates. Only add a thin shared-tool directory later if
+members genuinely need to discover/request shared external tools (e.g., a shared service endpoint).
+
+---
+
+## Data model sketch (doc families; brainstorming, not final)
+
+| Concern | Primitive | Scope | Key fields |
+|---|---|---|---|
+| Engram profiles | doc family `board.engram` | global | id, name, kind, capabilities, restrictions, skills, boundaries, trustLevel, status, endpoint, currentFocus |
+| Human profiles | doc family `board.human` | global | id, name, roles, permissions, prefs, channels |
+| Jobs | doc `board.job` + owned conversation/task | global | id, title, body, requester, assignee?, status, priority, due?, artifacts, result |
+| Channels (routing) | doc `board.channel` → conversation id | global | id, conversationId, members[], purpose |
+| Messages (forum/DM) | **conversation** (not a new store) | per conversation | transcript entries + watch |
+| Knowledge | doc family `board.knowledge` (or elevated /kb) | global | id, title, body, author, source, trustTier, createdAt |
+| Requests/approvals | existing `ApprovalDoc` + board surfacing | session/global | key, tool/args, decision, decidedBy, decidedAt |
+| Status/usage | native `watch` + `pi.usage` | per conv/job | live deltas, tokens/cost |
+| Schedule | background tasks + cron submissions | global | job id, cadence, next fire |
+
+**Claim flow (atomic):** `commit(tx)`: read `board.job[id]`; if `status === "open"`, set
+`assignee = me`, `status = "claimed"`; else return "taken" and the claimer picks the next open job.
+No double-claim within one harness.
+
+---
+
+## Security-critical design points (non-negotiable)
+1. **Registration = auth surface.** Only the human (A) or a governed process (B) can register/modify
+   profiles; revocation must be durable.
+2. **Peer & external content is untrusted data** with provenance + trust tier — never instructions.
+3. **Claims and status changes are atomic commits** — no races, exactly-once.
+4. **Trust tiers gate action scope** — a member's profile `boundaries`/`trustLevel` constrain what it
+   may do; external side effects still route to the human for approval.
+5. **Containment of a bad member** — per-member sandbox, no shared secrets, egress-limited; a
+   compromised member can't read another's secrets or act beyond its tier.
+6. **LAN-only + token-authed** until a project explicitly re-decides exposure.
+
+---
+
+## A vs. B scoping of the board
+
+| Board component | **A (Collective)** | **B (Society)** |
+|---|---|---|
+| Engram registry | static, human-vetted | dynamic + vetting/revocation |
+| Human profiles | exactly one operator | multiple humans / governance |
+| Jobs | human posts; members claim | members may also self-initiate |
+| Comms bus | team channels + DMs | open commons/marketplace |
+| Knowledge | shared with provenance/trust | open knowledge exchange, reputation-weighted |
+| Requests/approvals | to the one human | to governance layer |
+| Trust/authz | static allowlist + boundaries | dynamic trust/reputation/charter |
+| Status/schedule/budgets/audit | same (native) | same (native), at scale |
+
+**P0 (shared, build first):** registry + jobs (atomic claim) + comms-as-conversations + knowledge
+with provenance + requests/approvals + status/schedule/budgets + **static** trust. Everything above
+is a composition of existing primitives and changes nothing about the current single-brain product.
+
+**B-only (deferred):** dynamic trust/reputation, self-initiated jobs, multi-human governance, open
+registration, task-economy/allocation.
+
+---
+
+## Open questions / decisions
+1. **Member model:** in-harness named conversations (low-risk start) vs. separate instances? This
+   decides whether cross-member DMs are shared conversations or need the cross-instance tool + a
+   shared store for atomic claims.
+2. **Job posting authority (A):** only the human posts jobs, or may members post sub-jobs to each
+   other on already-assigned work? *(lean: members coordinate on assigned work; net-new external
+   effects gated to the human)*
+3. **Trust model (A):** static named allowlist + profile boundaries — enough for v1?
+4. **Knowledge trust tiers:** how many levels, and what can each tier trigger? (data-only vs. may-
+   request-action)
+5. **Board visibility/permissions:** can every member read every channel/job, or is it scoped per
+   member?
+6. **Naming:** working names for the board artifacts and the two projects.
