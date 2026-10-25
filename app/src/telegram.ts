@@ -461,7 +461,7 @@ export class TelegramClient {
             inline_keyboard: [
               destructive
                 ? [{ text: "⚠️ I understand the risk — run it", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }]
-                : [{ text: "✅ Approve", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }],
+                : [{ text: "✅ Approve", callback_data: `approve:${a.key}` }, { text: "🔁 Always allow", callback_data: `always:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }],
             ],
           },
         });
@@ -482,12 +482,25 @@ export class TelegramClient {
       await this.handleModelCallback(q, data);
       return;
     }
-    const [decision, key] = data.split(":");
-    if (!key || (decision !== "approve" && decision !== "deny")) return;
-    await this.decide(decision === "approve" ? "approved" : "denied", key, `telegram:${q.from?.first_name ?? "user"}`);
+    const [action, key] = data.split(":");
+    if (!key) return;
+    if (action === "approve") {
+      await this.decide("approved", key, `telegram:${q.from?.first_name ?? "user"}`);
+    } else if (action === "always") {
+      // Approve AND write a persistent allow-rule in one commit.
+      await this.decide("approved", key, `telegram:${q.from?.first_name ?? "user"}`, undefined, true);
+    } else if (action === "deny") {
+      await this.decide("denied", key, `telegram:${q.from?.first_name ?? "user"}`);
+    }
   }
 
-  private async decide(decision: "approved" | "denied", key: string, decidedBy: string, reason?: string): Promise<void> {
+  private async decide(
+    decision: "approved" | "denied",
+    key: string,
+    decidedBy: string,
+    reason?: string,
+    alwaysAllow?: boolean,
+  ): Promise<void> {
     // Resolve the owning conversation while the request is still pending.
     const known = this.approvalMsgs.get(key)?.convId;
     const convId = known ?? (await this.pendingConversationForKey(key));
@@ -496,12 +509,12 @@ export class TelegramClient {
     const res = await fetch(`${this.opts.apiBaseUrl}/approvals/${key}`, {
       method: "POST",
       headers: { authorization: `Bearer ${this.opts.apiToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ decision, ...(reason ? { reason } : {}) }),
+      body: JSON.stringify({ decision, ...(reason ? { reason } : {}), ...(alwaysAllow ? { alwaysAllow: true } : {}) }),
     });
     // Settle the button UI (edit away the buttons) whether or not we made the decision.
     const posted = this.approvalMsgs.get(key);
     if (posted) {
-      const label = decision === "approved" ? "✅ APPROVED" : "❌ DENIED";
+      const label = decision === "approved" ? (alwaysAllow ? "✅ APPROVED + always allowed" : "✅ APPROVED") : "❌ DENIED";
       await this.tg("editMessageText", { ...this.msgTarget(posted.key), message_id: posted.msgId, text: `🔒 ${label} by ${decidedBy}\nKey: \`${key}\`` }).catch(() => {});
       this.approvalMsgs.delete(key);
     }
@@ -510,7 +523,7 @@ export class TelegramClient {
       return; // someone else decided it first: do not double-instruct the agent
     }
     if (res.status !== 200) {
-      console.error(`[telegram] approval POST ${key}: ${res.status}`);
+      console.error(`[telegram] approval POST ${key}: ${res.status} ${(await res.text().catch(() => ""))}`);
       return;
     }
     const reasonLine = reason ? ` Reason given: "${reason}"` : "";

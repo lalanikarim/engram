@@ -431,6 +431,63 @@ async function main() {
     check("deny round-trip (skipped — no item)", false);
   }
 
+  console.log("\n[7c] persistent allow-rules");
+  const sub14 = await submit('Use the send_message tool to send carol@x.test the message "hello carol". Then confirm.', "t-rule-1");
+  check("first send completes (blocked)", await rootStream.waitForRunEnd(sub14, RUN_TIMEOUT));
+  const apprR = await api("GET", "/approvals");
+  const ruleItem = (apprR.json?.approvals ?? []).find((a: any) => a.tool === "send_message" && a.args?.to === "carol@x.test");
+  check("send to carol pending", Boolean(ruleItem), JSON.stringify(apprR.json));
+  if (ruleItem) {
+    const allow = await api("POST", `/approvals/${ruleItem.key}`, { decision: "approved", alwaysAllow: true });
+    check("approve + alwaysAllow returns a rule id", allow.status === 200 && typeof allow.json?.rule === "string");
+    const rulesList = await api("GET", "/approval-rules");
+    const storedRule = (rulesList.json?.rules ?? []).find((r: any) => r.id === allow.json?.rule);
+    check(
+      "rule stored with recipient-only scope",
+      storedRule?.tool === "send_message" && JSON.stringify(storedRule?.match) === '{"to":"carol@x.test"}',
+      JSON.stringify(storedRule),
+    );
+
+    // A second send to the same recipient must pass silently — no new prompt.
+    const sub15 = await submit('Use the send_message tool to send carol@x.test the message "second note". Then confirm.', "t-rule-2");
+    check("second send completes", await rootStream.waitForRunEnd(sub15, RUN_TIMEOUT));
+    const apprR2 = await api("GET", "/approvals");
+    check(
+      "no new prompt for the allow-listed recipient",
+      !(apprR2.json?.approvals ?? []).some((a: any) => a.tool === "send_message" && a.args?.to === "carol@x.test"),
+      JSON.stringify(apprR2.json),
+    );
+    const executed = (await api("GET", "/conversations/1/entries?after=0&limit=300")).json?.entries ?? [];
+    check(
+      "second send executed",
+      executed.flatMap((en: any) => en.model ?? []).some((m: any) => m.role === "toolResult" && m.toolName === "send_message" && JSON.stringify(m).includes("second note")),
+    );
+
+    // Destructive actions can never be allow-listed.
+    const sub16 = await submit("Run the bash command `rm -rf /tmp/engram-rule-test` and confirm.", "t-rule-3");
+    check("destructive run completes (blocked)", await rootStream.waitForRunEnd(sub16, RUN_TIMEOUT));
+    const apprD2 = await api("GET", "/approvals");
+    const destrItem = (apprD2.json?.approvals ?? []).find((a: any) => a.tier === "destructive" && JSON.stringify(a.args).includes("rm -rf"));
+    if (destrItem) {
+      const badAllow = await api("POST", `/approvals/${destrItem.key}`, { decision: "approved", alwaysAllow: true });
+      check("alwaysAllow rejected for destructive tier", badAllow.status === 400);
+      await api("POST", `/approvals/${destrItem.key}`, { decision: "denied" });
+    } else {
+      check("destructive allow-list attempt (skipped — no item)", false);
+    }
+
+    // Rule management.
+    const del = await api("DELETE", `/approval-rules/${allow.json.rule}`);
+    check("rule deleted", del.status === 200);
+    const rulesAfter = await api("GET", "/approval-rules");
+    check(
+      "deleted rule no longer listed",
+      !(rulesAfter.json?.rules ?? []).some((r: any) => r.id === allow.json?.rule),
+    );
+  } else {
+    check("allow-rule flow (skipped — no pending item)", false);
+  }
+
   console.log("\n[8] subagents: parallel delegate fan-out");
   const sub8 = await submit(
     'Use the delegate tool with two jobs in parallel: (1) researcher — fetch https://example.com and report its title in under 10 words; (2) worker — create a file note.txt containing "from worker" and confirm it. Then summarize both results.',

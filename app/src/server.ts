@@ -30,7 +30,14 @@ import {
   parseModelRef,
   type ModelsConfig,
 } from "./model.ts";
-import { ApprovalDoc, parseApprovalMarker } from "./extensions/approvals.ts";
+import {
+  ApprovalDoc,
+  ApprovalRulesDoc,
+  defaultRuleMatch,
+  parseApprovalMarker,
+  ruleIdFor,
+  type ApprovalRule,
+} from "./extensions/approvals.ts";
 import { ConversationMeta } from "./meta.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -95,6 +102,52 @@ function resolveModelParam(modelsConfig: ModelsConfig, model: unknown): ModelRef
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
   }
+}
+
+/**
+ * Pending approval requests across conversations, each attributed with the agent's most
+ * recent assistant message before its marker (the "why" shown to the human).
+ */
+async function pendingApprovals(harness: Harness): Promise<Record<string, unknown>[]> {
+  const found = await harness.commit(async (tx) => {
+    const convs = await tx.scanConversations({ order: "descending" }, 100);
+    const pending = new Map<string, Record<string, unknown>>();
+    for (const c of convs.items) {
+      const entries = await tx.scanEntries({ conversationId: c.id, order: "ascending" }, 200);
+      let why: string | undefined;
+      for (const e of entries.items) {
+        let sawAssistant = false;
+        for (const m of e.model ?? []) {
+          if (m.role !== "assistant") continue;
+          sawAssistant = true;
+          const text = (typeof m.content === "string" ? [m.content] : m.content.filter((c) => c.type === "text").map((c) => c.text)).join(" ").trim();
+          if (text) why = text.slice(0, 300);
+        }
+        for (const text of entryTexts(e)) {
+          const marker = parseApprovalMarker(text);
+          if (marker && !pending.has(marker.key)) {
+            pending.set(marker.key, {
+              key: marker.key,
+              tool: marker.tool,
+              args: marker.args,
+              tier: marker.tier ?? "prompt",
+              why: sawAssistant ? undefined : why,
+              conversationId: c.id,
+              entryId: e.id,
+            });
+          }
+        }
+      }
+    }
+    return [...pending.values()];
+  }, ctx);
+
+  const items: Record<string, unknown>[] = [];
+  for (const p of found) {
+    const rec = await harness.snapshot(ApprovalDoc, p.key as string, ctx);
+    if (!rec || rec.decision === "pending") items.push(p);
+  }
+  return items;
 }
 
 /** Rough transcript size in tokens (chars/4 over the visible model context). */
@@ -458,47 +511,28 @@ export function createServer(deps: ServerDeps): http.Server {
       }
 
       if (req.method === "GET" && pathname === "/approvals") {
-        // Ascending scan so we can attribute each marker with the agent's most recent
-        // assistant message before it (the "why" shown to the human).
-        const found = await harness.commit(async (tx) => {
-          const convs = await tx.scanConversations({ order: "descending" }, 100);
-          const pending = new Map<string, Record<string, unknown>>();
-          for (const c of convs.items) {
-            const entries = await tx.scanEntries({ conversationId: c.id, order: "ascending" }, 200);
-            let why: string | undefined;
-            for (const e of entries.items) {
-              let sawAssistant = false;
-              for (const m of e.model ?? []) {
-                if (m.role !== "assistant") continue;
-                sawAssistant = true;
-                const text = (typeof m.content === "string" ? [m.content] : m.content.filter((c) => c.type === "text").map((c) => c.text)).join(" ").trim();
-                if (text) why = text.slice(0, 300);
-              }
-              for (const text of entryTexts(e)) {
-                const marker = parseApprovalMarker(text);
-                if (marker && !pending.has(marker.key)) {
-                  pending.set(marker.key, {
-                    key: marker.key,
-                    tool: marker.tool,
-                    args: marker.args,
-                    tier: marker.tier ?? "prompt",
-                    why: sawAssistant ? undefined : why,
-                    conversationId: c.id,
-                    entryId: e.id,
-                  });
-                }
-              }
-            }
-          }
-          return [...pending.values()];
-        }, ctx);
-
-        const items = [];
-        for (const p of found) {
-          const rec = await harness.snapshot(ApprovalDoc, p.key as string, ctx);
-          if (!rec || rec.decision === "pending") items.push(p);
-        }
+        const items = await pendingApprovals(harness);
         sendJson(res, 200, { approvals: items });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/approval-rules") {
+        const doc = await harness.snapshot(ApprovalRulesDoc, ctx);
+        sendJson(res, 200, { rules: doc?.rules ?? [] });
+        return;
+      }
+
+      const ruleMatch = pathname.match(/^\/approval-rules\/([a-f0-9]{12})$/);
+      if (req.method === "DELETE" && ruleMatch) {
+        const id = ruleMatch[1];
+        const result = await harness.commit(async (tx) => {
+          const d = await tx.doc(ApprovalRulesDoc);
+          const before = d.rules.length;
+          d.rules = d.rules.filter((r) => r.id !== id);
+          return d.rules.length < before;
+        }, ctx);
+        if (!result) sendJson(res, 404, { error: `rule ${id} not found` });
+        else sendJson(res, 200, { id, deleted: true });
         return;
       }
 
@@ -512,6 +546,26 @@ export function createServer(deps: ServerDeps): http.Server {
           sendJson(res, 400, { error: 'body must be {decision: "approved" | "denied"[, reason?: string]}' });
           return;
         }
+        // "Always allow" writes a persistent rule in the SAME commit as the approval.
+        const alwaysAllow = body.alwaysAllow === true;
+        if (alwaysAllow && decision !== "approved") {
+          sendJson(res, 400, { error: 'alwaysAllow requires decision "approved"' });
+          return;
+        }
+        let rule: ApprovalRule | null = null;
+        if (alwaysAllow) {
+          const item = (await pendingApprovals(harness)).find((a) => a.key === key);
+          if (!item) {
+            sendJson(res, 404, { error: `approval ${key} not found` });
+            return;
+          }
+          if (item.tier === "destructive") {
+            sendJson(res, 400, { error: "destructive actions can never be allow-listed" });
+            return;
+          }
+          const match = defaultRuleMatch(item.tool as string, item.args);
+          rule = { id: ruleIdFor(item.tool as string, match), tool: item.tool as string, match, createdAt: Date.now(), source: "approval" };
+        }
         // Idempotent: a key may be decided twice in a race (double-tap, button + text).
         const result = await harness.commit(async (tx) => {
           const d = await tx.doc(ApprovalDoc, key, {});
@@ -520,6 +574,10 @@ export function createServer(deps: ServerDeps): http.Server {
           d.decidedBy = "api";
           d.decidedAt = Date.now();
           if (reason) d.reason = reason;
+          if (rule) {
+            const rules = await tx.doc(ApprovalRulesDoc);
+            if (!rules.rules.some((r) => r.id === rule!.id)) rules.rules.push(rule!);
+          }
           return { already: false as const, decision, reason };
         }, ctx);
         if (result.already) {
@@ -528,7 +586,7 @@ export function createServer(deps: ServerDeps): http.Server {
         }
         // Clients (Telegram/Web) feed the decision back to the agent; the endpoint
         // only records it. The reason travels in the response so clients can relay it.
-        sendJson(res, 200, { key, decision, reason: result.reason ?? null });
+        sendJson(res, 200, { key, decision, reason: result.reason ?? null, rule: rule?.id ?? null });
         return;
       }
 

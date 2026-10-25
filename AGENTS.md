@@ -8,7 +8,8 @@ foundation (all gates passed — see `POC-FINDINGS.md`), and the 2-week MVP per 
 sandbox sidecar (D12–13), and the D14 hardening & security pass — see the progress log at
 the bottom of `POC-FINDINGS.md`. Remaining post-MVP: §5 item 7 container packaging. Detailed
 plans for post-MVP work live in `docs/plans/` (model catalog — done; smarter approvals —
-planned, phase 1 next).
+phases 1–2 done [risk tiers + destructive guard + rich prompts/denial reasons + persistent
+allow-rules], phases 3–4 next).
 
 ## Repo layout
 
@@ -48,6 +49,10 @@ planned, phase 1 next).
   or generation silently degrades to 1-token answers.
 - Approval decision keys are `sha1(tool + exact args)` → approvals are per distinct action and
   idempotent across crash-retries (an approved action re-executes on retry by design).
+- Approval gating order is **destructive guard → allow-rule match → tier** (`gates.ts` /
+  `approvals.ts`). Destructive-tier calls can never be auto-approved or covered by an
+  allow-rule — that invariant must survive any future phase. Allow-rules live in the session
+  singleton doc `ApprovalRulesDoc` (one doc, not a family: pi-durable has no doc-family scan).
 - Telegram: gate progress-message edits on `run_start`/`run_end`, and settle (edit away)
   approval buttons after a decision; make `recordApproval` idempotent.
 - Compaction summary budget = `min(0.8 × reserveTokens, model.maxTokens)`.
