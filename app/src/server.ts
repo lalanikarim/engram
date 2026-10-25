@@ -458,12 +458,22 @@ export function createServer(deps: ServerDeps): http.Server {
       }
 
       if (req.method === "GET" && pathname === "/approvals") {
+        // Ascending scan so we can attribute each marker with the agent's most recent
+        // assistant message before it (the "why" shown to the human).
         const found = await harness.commit(async (tx) => {
           const convs = await tx.scanConversations({ order: "descending" }, 100);
           const pending = new Map<string, Record<string, unknown>>();
           for (const c of convs.items) {
-            const entries = await tx.scanEntries({ conversationId: c.id, order: "descending" }, 200);
+            const entries = await tx.scanEntries({ conversationId: c.id, order: "ascending" }, 200);
+            let why: string | undefined;
             for (const e of entries.items) {
+              let sawAssistant = false;
+              for (const m of e.model ?? []) {
+                if (m.role !== "assistant") continue;
+                sawAssistant = true;
+                const text = (typeof m.content === "string" ? [m.content] : m.content.filter((c) => c.type === "text").map((c) => c.text)).join(" ").trim();
+                if (text) why = text.slice(0, 300);
+              }
               for (const text of entryTexts(e)) {
                 const marker = parseApprovalMarker(text);
                 if (marker && !pending.has(marker.key)) {
@@ -471,6 +481,8 @@ export function createServer(deps: ServerDeps): http.Server {
                     key: marker.key,
                     tool: marker.tool,
                     args: marker.args,
+                    tier: marker.tier ?? "prompt",
+                    why: sawAssistant ? undefined : why,
                     conversationId: c.id,
                     entryId: e.id,
                   });
@@ -495,8 +507,9 @@ export function createServer(deps: ServerDeps): http.Server {
         const key = approvalMatch[1];
         const body = await readJsonBody(req);
         const decision = body.decision;
+        const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 500) : null;
         if (decision !== "approved" && decision !== "denied") {
-          sendJson(res, 400, { error: 'body must be {decision: "approved" | "denied"}' });
+          sendJson(res, 400, { error: 'body must be {decision: "approved" | "denied"[, reason?: string]}' });
           return;
         }
         // Idempotent: a key may be decided twice in a race (double-tap, button + text).
@@ -506,13 +519,16 @@ export function createServer(deps: ServerDeps): http.Server {
           d.decision = decision;
           d.decidedBy = "api";
           d.decidedAt = Date.now();
-          return { already: false as const, decision };
+          if (reason) d.reason = reason;
+          return { already: false as const, decision, reason };
         }, ctx);
         if (result.already) {
           sendJson(res, 409, { key, error: `already ${result.decision}` });
           return;
         }
-        sendJson(res, 200, { key, decision });
+        // Clients (Telegram/Web) feed the decision back to the agent; the endpoint
+        // only records it. The reason travels in the response so clients can relay it.
+        sendJson(res, 200, { key, decision, reason: result.reason ?? null });
         return;
       }
 

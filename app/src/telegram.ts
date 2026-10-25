@@ -7,6 +7,7 @@
 // Text fallback: "approve <key>" / "deny <key>". Access control via ALLOWED_TELEGRAM_IDS.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { renderAction } from "./extensions/gates.ts";
 
 export interface TelegramClientOptions {
   botToken: string;
@@ -49,10 +50,15 @@ function parseChatKey(key: string): { chatId: number; threadId?: number } {
 }
 
 /** "approve|deny <key>" text fallback. */
-export function parseApprovalText(text: string): { decision: "approved" | "denied"; key: string } | null {
-  const m = text.match(/\b(approve|deny|denied|reject)\b[\s:]*([a-f0-9]{12})/i);
+/**
+ * Text fallback for decisions: `approve|deny <key>` with an optional reason:
+ * `deny <key> because <reason>` (also accepts `denied`/`reject`).
+ */
+export function parseApprovalText(text: string): { decision: "approved" | "denied"; key: string; reason?: string } | null {
+  const m = text.match(/\b(approve|deny|denied|reject)\b[\s:]*([a-f0-9]{12})(?:\s+because\s+(.+))?/is);
   if (!m) return null;
-  return { decision: /approve/i.test(m[1]) ? "approved" : "denied", key: m[2] };
+  const reason = m[3]?.trim();
+  return { decision: /approve/i.test(m[1]) ? "approved" : "denied", key: m[2], reason: reason || undefined };
 }
 
 function loadState(file: string): State {
@@ -344,7 +350,7 @@ export class TelegramClient {
     const approval = parseApprovalText(text);
     if (approval) {
       this.postedKeys.add(approval.key);
-      await this.decide(approval.decision, approval.key, `telegram-text:${msg.from?.first_name ?? "user"}`);
+      await this.decide(approval.decision, approval.key, `telegram-text:${msg.from?.first_name ?? "user"}`, approval.reason);
       return;
     }
 
@@ -425,7 +431,14 @@ export class TelegramClient {
       });
       if (!res.ok) return;
       const body = (await res.json()) as {
-        approvals: Array<{ key: string; tool: string; args: Record<string, unknown>; conversationId: number }>;
+        approvals: Array<{
+          key: string;
+          tool: string;
+          args: Record<string, unknown>;
+          tier?: string;
+          why?: string;
+          conversationId: number;
+        }>;
       };
       // Only conversations this bot owns.
       const mine = new Map<number, string>();
@@ -433,14 +446,23 @@ export class TelegramClient {
       for (const a of body.approvals) {
         const key = mine.get(a.conversationId);
         if (!key || this.postedKeys.has(a.key)) continue;
-        const argsLine = Object.entries(a.args)
-          .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
-          .join(", ");
+        const destructive = a.tier === "destructive";
+        const action = renderAction(a.tool, a.args).slice(0, 500);
+        const whyLine = a.why ? `\nWhy: ${a.why.slice(0, 300)}` : "";
+        const badge = destructive ? "⚠️ DESTRUCTIVE — " : "";
         const r = await this.tg("sendMessage", {
           ...this.msgTarget(key),
-          text: `⚠️ The agent wants to run \`${a.tool}\` (${argsLine.slice(0, 300)}) and needs your approval.\nKey: \`${a.key}\``,
+          text:
+            `${destructive ? "🔴" : "⚠️"} ${badge}The agent wants to run \`${a.tool}\`:\n${action}${whyLine}\nKey: \`${a.key}\`` +
+            (destructive
+              ? "\nThis action is destructive. Approving requires explicitly acknowledging the risk. Deny with a reason via: deny <key> because …"
+              : "\nDeny with a reason via: deny <key> because …"),
           reply_markup: {
-            inline_keyboard: [[{ text: "✅ Approve", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }]],
+            inline_keyboard: [
+              destructive
+                ? [{ text: "⚠️ I understand the risk — run it", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }]
+                : [{ text: "✅ Approve", callback_data: `approve:${a.key}` }, { text: "❌ Deny", callback_data: `deny:${a.key}` }],
+            ],
           },
         });
         this.approvalMsgs.set(a.key, { key, msgId: Number(r.message_id), convId: a.conversationId });
@@ -465,7 +487,7 @@ export class TelegramClient {
     await this.decide(decision === "approve" ? "approved" : "denied", key, `telegram:${q.from?.first_name ?? "user"}`);
   }
 
-  private async decide(decision: "approved" | "denied", key: string, decidedBy: string): Promise<void> {
+  private async decide(decision: "approved" | "denied", key: string, decidedBy: string, reason?: string): Promise<void> {
     // Resolve the owning conversation while the request is still pending.
     const known = this.approvalMsgs.get(key)?.convId;
     const convId = known ?? (await this.pendingConversationForKey(key));
@@ -474,7 +496,7 @@ export class TelegramClient {
     const res = await fetch(`${this.opts.apiBaseUrl}/approvals/${key}`, {
       method: "POST",
       headers: { authorization: `Bearer ${this.opts.apiToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify({ decision, ...(reason ? { reason } : {}) }),
     });
     // Settle the button UI (edit away the buttons) whether or not we made the decision.
     const posted = this.approvalMsgs.get(key);
@@ -491,10 +513,11 @@ export class TelegramClient {
       console.error(`[telegram] approval POST ${key}: ${res.status}`);
       return;
     }
+    const reasonLine = reason ? ` Reason given: "${reason}"` : "";
     const content =
       decision === "approved"
         ? `The human APPROVED action key ${key}. Retry the action with the exact same arguments.`
-        : `The human DENIED action key ${key}. Do not retry it; report that it was declined.`;
+        : `The human DENIED action key ${key}.${reasonLine} Do not retry it; report that it was declined and adapt if the reason suggests a different approach.`;
     await this.apiPost("/tasks", { content, requestId: `tg-${decision}-${key}-${Date.now()}`, conversationId: convId });
   }
 

@@ -17,6 +17,8 @@ export type RoleConfig = {
   model?: string;
 };
 
+import type { GatesConfig } from "./extensions/gates.ts";
+
 /** One declarative HTTP tool (app/tools.json). */
 export type HttpToolSpec = {
   name: string;
@@ -44,8 +46,8 @@ export type AppConfig = {
   backgroundTokens: number;
   roles: RoleConfig[];
   httpTools: HttpToolSpec[];
-  /** Tool names that require human approval before execution. */
-  gatedTools: string[];
+  /** Risk-tiered gate config (app/gates.json; legacy GATED_TOOLS fallback when absent). */
+  gates: GatesConfig | null;
   /** Podman sandbox for code-gen/test conversations (D12–13). */
   sandbox: {
     image: string;
@@ -87,10 +89,14 @@ export function loadConfig(): AppConfig {
     backgroundTokens: Number(process.env.BACKGROUND_TOKENS ?? 8192),
     roles,
     httpTools,
-    gatedTools: (process.env.GATED_TOOLS ?? "send_message")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
+    // gates.json wins; otherwise the legacy GATED_TOOLS list becomes prompt-tier entries.
+    gates: readJson<GatesConfig | null>(path.join(configDir, "gates.json"), null) ?? {
+      tiers: (process.env.GATED_TOOLS ?? "send_message")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((tool) => ({ tool })),
+    },
     sandbox: {
       image: process.env.SANDBOX_IMAGE ?? "docker.io/library/python:3.12-alpine",
       network: process.env.SANDBOX_NETWORK ?? "none",

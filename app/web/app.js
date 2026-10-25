@@ -203,24 +203,39 @@ function ChatView({ conv, onConvsChanged }) {
 
 // ---- approvals banner (polls GET /approvals) ----
 
+// Human-readable rendering of a gated action (mirrors src/extensions/gates.ts).
+function renderAction(tool, args) {
+  const a = args ?? {};
+  if (tool === "bash") return String(a.command ?? "");
+  if (tool === "send_message") {
+    const to = a.to !== undefined ? `to ${a.to}` : "";
+    const message = a.message !== undefined ? `\n${a.message}` : "";
+    return `${to}${message}`.trim();
+  }
+  return JSON.stringify(a);
+}
+
 function ApprovalsBanner({ approvals, onDecided }) {
   const [pendingKeys, setPendingKeys] = useState(new Set());
+  const [reasons, setReasons] = useState({}); // key → denial reason text
 
   const decide = async (key, conversationId, decision) => {
     setPendingKeys((p) => new Set(p).add(key));
+    const reason = reasons[key]?.trim() || undefined;
     try {
       const res = await fetch(`/approvals/${key}`, {
         method: "POST",
         headers: { authorization: `Bearer ${getToken()}`, "content-type": "application/json" },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision, ...(reason ? { reason } : {}) }),
       });
       if (res.status === 409) return; // already decided — the poll will drop it
       if (!res.ok) throw new Error(`approval ${key} → ${res.status}`);
-      // Instruct the agent, mirroring the Telegram client.
+      // Instruct the agent, mirroring the Telegram client (relaying any denial reason).
+      const reasonLine = reason ? ` Reason given: "${reason}"` : "";
       const content =
         decision === "approved"
           ? `The human APPROVED action key ${key}. Retry the action with the exact same arguments.`
-          : `The human DENIED action key ${key}. Do not retry it; report that it was declined.`;
+          : `The human DENIED action key ${key}.${reasonLine} Do not retry it; report that it was declined and adapt if the reason suggests a different approach.`;
       await api("/tasks", { method: "POST", body: { content, requestId: crypto.randomUUID(), conversationId } });
     } catch (err) {
       console.error("decide:", err);
@@ -236,17 +251,24 @@ function ApprovalsBanner({ approvals, onDecided }) {
 
   if (approvals.length === 0) return null;
   return html`<div class="approvals" data-testid="approvals">
-    ${approvals.map((a) => html`<div class="approval" key=${a.key}>
-      <span>⚠️</span>
-      <span class="a-what">${a.tool}(${Object.entries(a.args ?? {})
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-        .join(" ")})</span>
+    ${approvals.map((a) => {
+      const destructive = a.tier === "destructive";
+      return html`<div class="approval${destructive ? " destructive" : ""}" key=${a.key}>
+      <span>${destructive ? "🔴" : "⚠️"}</span>
+      ${destructive && html`<span class="a-tier">DESTRUCTIVE</span>`}
+      <span class="a-what">${a.tool}: ${renderAction(a.tool, a.args)}</span>
+      ${a.why && html`<span class="a-why">Why: ${a.why}</span>`}
       <span class="a-key">${a.key}</span>
+      <input class="a-reason" placeholder="reason (optional)"
+        value=${reasons[a.key] ?? ""} data-testid="reason-input"
+        onInput=${(e) => setReasons((r) => ({ ...r, [a.key]: e.target.value }))} />
       <button class="btn small approve" data-testid="approve-btn" disabled=${pendingKeys.has(a.key)}
-        onClick=${() => decide(a.key, a.conversationId, "approved")}>Approve</button>
+        onClick=${() => decide(a.key, a.conversationId, "approved")}>
+        ${destructive ? "I understand the risk — run it" : "Approve"}</button>
       <button class="btn small deny" data-testid="deny-btn" disabled=${pendingKeys.has(a.key)}
         onClick=${() => decide(a.key, a.conversationId, "denied")}>Deny</button>
-    </div>`)}
+    </div>`;
+    })}
   </div>`;
 }
 

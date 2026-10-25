@@ -5,6 +5,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { AppConfig } from "./config.ts";
 import type { ModelsConfig } from "./model.ts";
 import { approvalHook, sendMessageTool } from "./extensions/approvals.ts";
+import { compileGates } from "./extensions/gates.ts";
 import { httpToolExtension } from "./extensions/http-tools.ts";
 import { kbSearchTool } from "./extensions/kb-search.ts";
 import { subagentExtension } from "./extensions/subagents.ts";
@@ -30,7 +31,7 @@ export function buildRegistry(config: AppConfig, modelsConfig: ModelsConfig) {
     defineExtension({
       name: "sensitive",
       tools: [sendMessageTool()],
-      hooks: [approvalHook(config.gatedTools)], // gates any selected extension's calls to gated tool names
+      hooks: [approvalHook(compileGates(config.gates))], // risk-tiered gate (docs/plans/approvals.md)
     }),
   );
   registry.install(subagentExtension(config.roles, modelsConfig));

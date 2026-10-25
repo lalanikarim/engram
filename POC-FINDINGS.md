@@ -435,10 +435,36 @@ credential resolution, ref parsing incl. ambiguity, default chain, provider list
 discovery + id-conflict). Live api suite now **58/58** (was 48; +10 for catalog/providers/
 switch/reset/400s), telegram 24/24 (incl. the T6 picker flow), `tsc --noEmit` clean.
 
+### Smarter approvals — phase 1 ✅ COMPLETE (2026-10-25, `feature/approvals-phase1`)
+
+Spec: [`docs/plans/approvals.md`](docs/plans/approvals.md). Risk-tiered gating replaces the
+static `GATED_TOOLS` list:
+
+- **`app/gates.json`** — per-tool tiers (`autoPatterns` pass silently; `default: "prompt"`
+  blocks until a human decision). Legacy `GATED_TOOLS` env remains as fallback when no
+  gates.json is present. Shipped default: `bash` safe patterns auto, `send_message` prompt.
+- **Destructive guard** — built-in pattern list (`rm -rf/-fr`, `mkfs`, `dd if=`, fork bomb,
+  force push, `git reset --hard`, `DROP TABLE/DATABASE/INDEX`, `TRUNCATE`, `/dev/` writes,
+  shutdown/reboot) is **always on** and beats everything: destructive calls always prompt
+  with an explicit "I understand the risk — run it" acknowledgement button (Telegram + Web UI)
+  and can never be auto-approved or allow-listed (phase 2 must preserve this).
+- **Rich prompts** — approval requests now carry the agent's preceding message ("why",
+  truncated) plus tool-specific rendering of the action (`bash` → command line,
+  `send_message` → recipient + body) and a tier badge.
+- **Denial reasons** — `POST /approvals/:key` accepts `{decision, reason?}`; Web UI has a
+  reason field on deny; Telegram text fallback extended to `deny <key> because …`; the
+  reason is relayed back to the agent so it can adapt.
+
+Verification: new unit suite `test/gates.test.ts` — **19/19** (tier order destructive > auto >
+default, pattern edge cases, config validation, arg rendering). Live api suite now **63/63**
+(+5 in `[7b]`: `rm -rf` blocked with tier badge, why present in prompt, denial reason
+round-trip, no longer pending after deny). Telegram 24/24 unchanged; `tsc --noEmit` clean.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
 container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
 host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
-Next planned work: smarter approvals (`docs/plans/approvals.md` — risk tiers + destructive
-guard first). Everything else in PLAN §4 is complete.
+Next planned work: smarter approvals phases 2–4 (`docs/plans/approvals.md`; phase 1 — risk
+tiers + destructive guard + rich prompts/denial reasons — is done). Everything else in
+PLAN §4 is complete.

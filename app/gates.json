@@ -1,0 +1,18 @@
+{
+  "tiers": [
+    {
+      "tool": "bash",
+      "autoPatterns": [
+        "^ls( |$)",
+        "^cat ",
+        "^pwd$",
+        "^echo ",
+        "^git (status|diff|log|show)( |$)",
+        "^node --version$",
+        "^npm ls"
+      ],
+      "default": "prompt"
+    },
+    { "tool": "send_message", "default": "prompt" }
+  ]
+}
