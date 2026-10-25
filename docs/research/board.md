@@ -285,6 +285,116 @@ registration, task-economy/allocation.
 
 ---
 
+## P0 in-harness sketch (concrete)
+
+Design-level sketch for the M1 board — what's new vs. reused, the doc families, the tools, the
+claim state machine, and the member lifecycle. Not a final spec; exact delivery mechanics marked
+*confirm at build*.
+
+### New vs. reused
+- **Reused (already built):** harness over SQLite + `resume()`; conversations with per-conversation
+  agent config (model/tools/cwd/instructions); `submit` (exactly-once via `requestId`);
+  `watchEvents`/SSE; approval hook (`beforeTool` + memo) + `ApprovalDoc`; documents; the subagent
+  task pattern; HTTP/SSE API; Telegram/Web UI clients.
+- **New (P0 board):** session-scoped doc families (`board.engram`, `board.human`, `board.job`,
+  `board.channel`, `board.knowledge`) + a `board.jobIndex` singleton; the coordinator conversation
+  + board tools; **standing named members** (registered conversations, not ephemeral subagents);
+  the job/claim state machine; the member-abstraction seam.
+
+### Doc families (session-scoped → shared by all members + human)
+| Family / doc | Key | Fields (minimal) |
+|---|---|---|
+| `board.engram` (family) | engram id | id, name, kind, capabilities[], restrictions[], skills[], boundaries, trustLevel, status(idle\|busy\|offline), conversationId, createdAt |
+| `board.human` (family) | human id | id, name, roles[], permissions, prefs, channels[] |
+| `board.job` (family) | job id | id, title, body, requester{type,id}, assignee{type,id}\|null, status, priority, due?, artifacts[], result?, createdAt, updatedAt |
+| `board.jobIndex` (singleton) | — | open: jobId[] (ids currently claimable; maintained on post/claim) |
+| `board.channel` (family) | channel id | id, conversationId, members[], purpose |
+| `board.knowledge` (family) | knowledge id | id, title, body, author{type,id}, source(human\|engram\|web), trustTier, createdAt |
+
+All are `defineDocFamily({ family: true, scope: "session", kind, version: 1, initial })`; read/written
+inside `api.commit((tx) => …)` via `tx.doc(Family, key, seed)`.
+
+### Board tools (installed on coordinator + members; gated by role/trust)
+| Tool | Who | Params (summary) | Behavior / pi-durable call |
+|---|---|---|---|
+| `register` | coordinator/human (gated) | name, kind, capabilities, restrictions, skills, boundaries, trustLevel | atomic upsert of `board.engram[id]`; creates/links the member's standing conversation; returns profile |
+| `post_job` | human/coordinator | title, body, requester, assignee?, priority?, due? | atomic: write `board.job[id]` (status open or assigned) + push id to `board.jobIndex.open`; if assigned, trigger the member (below) |
+| `claim_job` | member | filter?{kind?, skill?} | **atomic single-winner claim** (pseudocode below); returns claimed job brief or "none open" |
+| `route_message` | any (per trust) | to{type:member\|channel, id}, text, replyTo? | resolve target via `board.channel`/`board.engram`; submit input to that conversation (exactly-once requestId). **This is the `send_message` seam** → becomes `POST /tasks` to a peer in M2 |
+| `publish_knowledge` | any (per trust) | title, body, author, source, trustTier | atomic write of `board.knowledge[id]`; searchable; consumed as untrusted data |
+| `report_status` | member | jobId, status(done\|failed\|blocked), result?, artifacts? | atomic update of `board.job[jobId]` (+ remove from index if open) |
+| `board_status` | any (read-only) | — | snapshot/scan members + open jobs + pending requests; feeds Web UI/Telegram dashboards |
+
+Gated actions by any member still route to the human via the existing `ApprovalDoc` pattern; the board
+surfaces those as pending requests.
+
+**Atomic claim (the crux) — one commit, single winner:**
+```
+const res = await api.commit(async (tx) => {
+  const idx = await tx.doc(BoardJobIndex, "", { open: [] });   // singleton
+  const id = idx.open.find(jid => matchesCapability(jid, filter));
+  if (!id) return { claimed: null };
+  const d = await tx.doc(BoardJob, id, seed);
+  if (d.status !== "open") { idx.open = idx.open.filter(x => x !== id); return { claimed: null }; }
+  d.assignee = { type: "engram", id: meId };
+  d.status = "claimed"; d.updatedAt = Date.now();
+  idx.open = idx.open.filter(x => x !== id);
+  return { claimed: d };
+}, ctx);
+// member then works `res.claimed` in its own standing conversation (own model/tools/cwd/workspace)
+```
+No two members can claim the same job — the read+write is one atomic commit.
+
+### Job state machine
+| From | To | By | How |
+|---|---|---|---|
+| — | open | human/coordinator | `post_job` (add to index) |
+| open | claimed | member | `claim_job` (atomic, single winner) |
+| open/claimed | in-progress | member | begins working (submits brief / starts) |
+| in-progress | done \| failed | member | `report_status` with result |
+| in-progress | blocked | member | needs human/peer → posts a request/approval to the board |
+| any | cancelled | requester/coordinator | `report_status`/cancel |
+
+### Member lifecycle (end-to-end, on the existing API)
+**Pull (member picks up work — 3b):**
+1. Member's standing conversation is prompted (schedule / notification) to check for work.
+2. It calls `claim_job` → atomic claim returns the job brief.
+3. It works the brief **in its own context/workspace** (coding/web/etc.); gated actions → approval
+   request surfaced to the human.
+4. It calls `report_status` (done + result); optionally `route_message` a summary back to the requester.
+
+**Push (human/coordinator assigns — 3a):**
+1. Human posts a job (Telegram/Web UI → coordinator, or API `POST /tasks` to the coordinator).
+2. Coordinator triages: leaves it open for pickup, or assigns + triggers the member by submitting the
+   brief to that member's standing conversation (exactly-once requestId). *Confirm at build:* exact
+   delivery = `harness.conversation(id)` handle vs. a small task vs. `tx.createSubmission`.
+3. Member wakes, works it in its own context, reports status (as above).
+
+**Observation:** the human reads the board via Web UI/Telegram dashboards (`board_status` +
+`watchEvents` on the job docs) — live statuses, open jobs, pending approvals.
+
+### Security notes (P0 / M1)
+- **Registration is gated** to coordinator/human in A; profiles carry `boundaries` + `trustLevel` that
+  constrain what a member may do.
+- **Claim atomicity** = no double-claim, exactly-once.
+- **Knowledge/peer content is untrusted data** with provenance + trust tier — consumed as data, never
+  instructions (same discipline as web/email).
+- **Gated actions by any member** route to the human via `ApprovalDoc`.
+- **Shared-process caveat (M1):** members share one process/env; rely on per-conversation tool
+  restrictions + sandboxing for code + scoped secrets. Hard isolation is M2's job.
+
+### Implementation outline (what changes in `app/` — no code here)
+- New `board` extension: the doc families/singleton + tools, installed on coordinator + members;
+  `register`/`post_job` gated by role/trust.
+- **Standing members:** a way to create/register a *persistent named* conversation (vs. ephemeral
+  subagent) — e.g., board tool or API that creates the conversation + writes its `board.engram` profile.
+- **Member-abstraction seam:** `route_message`/delegation addressed by member id against local
+  conversations now; unchanged when a target becomes a remote instance (M2).
+- **Clients:** Web UI + Telegram board dashboard surfaces (members, open jobs, pending requests) over
+  existing SSE + doc snapshots.
+
+---
+
 ## Open questions / decisions
 1. **Member model:** in-harness named conversations (low-risk start) vs. separate instances? This
    decides whether cross-member DMs are shared conversations or need the cross-instance tool + a
