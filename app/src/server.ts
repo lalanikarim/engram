@@ -34,6 +34,7 @@ import {
   ApprovalDoc,
   ApprovalRulesDoc,
   defaultRuleMatch,
+  isApprovalExpired,
   parseApprovalMarker,
   ruleIdFor,
   type ApprovalRule,
@@ -106,7 +107,8 @@ function resolveModelParam(modelsConfig: ModelsConfig, model: unknown): ModelRef
 
 /**
  * Pending approval requests across conversations, each attributed with the agent's most
- * recent assistant message before its marker (the "why" shown to the human).
+ * recent assistant message before its marker (the "why" shown to the human) and the
+ * marker entry's timestamp (`pendingSince`, for TTL expiry).
  */
 async function pendingApprovals(harness: Harness): Promise<Record<string, unknown>[]> {
   const found = await harness.commit(async (tx) => {
@@ -134,6 +136,7 @@ async function pendingApprovals(harness: Harness): Promise<Record<string, unknow
               why: sawAssistant ? undefined : why,
               conversationId: c.id,
               entryId: e.id,
+              pendingSince: e.model?.[0]?.timestamp,
             });
           }
         }
@@ -148,6 +151,44 @@ async function pendingApprovals(harness: Harness): Promise<Record<string, unknow
     if (!rec || rec.decision === "pending") items.push(p);
   }
   return items;
+}
+
+/**
+ * TTL sweep (phase 3): durably deny every pending request older than `ttlMs`
+ * (`decidedBy: "ttl"`, idempotent) and notify each affected conversation exactly once
+ * (requestId keyed on the approval key). Returns the requests denied by THIS sweep.
+ */
+async function sweepExpiredApprovals(harness: Harness, ttlMs: number): Promise<Array<{ key: string; tool: string }>> {
+  const now = Date.now();
+  const expiredItems = (await pendingApprovals(harness)).filter((a) =>
+    isApprovalExpired(a.pendingSince as number | undefined, now, ttlMs),
+  );
+  const denied: Array<{ key: string; tool: string; conversationId: number }> = [];
+  for (const item of expiredItems) {
+    const wasPending = await harness.commit(async (tx) => {
+      const d = await tx.doc(ApprovalDoc, item.key as string, {});
+      if (d.decision !== "pending") return false;
+      d.decision = "denied";
+      d.decidedBy = "ttl";
+      d.decidedAt = now;
+      return true;
+    }, ctx);
+    if (wasPending) denied.push({ key: item.key as string, tool: item.tool as string, conversationId: item.conversationId as number });
+  }
+  for (const e of denied) {
+    const conv = await harness.conversation(cid(e.conversationId), ctx);
+    if (!conv) continue;
+    try {
+      // Exactly-once per key: a re-sweep after the notice already landed is a no-op.
+      await conv.submit(
+        { type: "input", content: `⏰ Approval \`${e.key}\` for \`${e.tool}\` expired after the approval TTL with no decision — treat it as denied. Do not retry that action; tell the user it lapsed.`, requestId: `ttl-expired-${e.key}` },
+        ctx,
+      );
+    } catch (err) {
+      console.error(`[server] TTL notice for ${e.key}: ${String(err instanceof Error ? err.message : err)}`);
+    }
+  }
+  return denied.map(({ key, tool }) => ({ key, tool }));
 }
 
 /** Rough transcript size in tokens (chars/4 over the visible model context). */
@@ -232,6 +273,18 @@ function entrySummary(e: EntryRecord) {
 
 export function createServer(deps: ServerDeps): http.Server {
   const { harness, root, config, modelsConfig } = deps;
+
+  // TTL sweeper: an initial pass after startup plus a periodic one. The period is bounded
+  // so tiny test TTLs still sweep within seconds; production (24 h) sweeps every 5 min.
+  const ttlMs = config.approvalTtlHours * 3_600_000;
+  const sweep = () => {
+    sweepExpiredApprovals(harness, ttlMs).catch((err) =>
+      console.error(`[server] TTL sweep: ${String(err instanceof Error ? err.message : err)}`),
+    );
+  };
+  const sweepTimer = setInterval(sweep, Math.max(5_000, Math.min(300_000, ttlMs / 4)));
+  sweepTimer.unref?.();
+  setTimeout(sweep, 2_000); // initial pass shortly after ready
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -511,8 +564,19 @@ export function createServer(deps: ServerDeps): http.Server {
       }
 
       if (req.method === "GET" && pathname === "/approvals") {
+        // Sweep first so the list never contains already-expired requests.
+        await sweepExpiredApprovals(harness, config.approvalTtlHours * 3_600_000);
         const items = await pendingApprovals(harness);
         sendJson(res, 200, { approvals: items });
+        return;
+      }
+
+      const approvalKeyMatch = pathname.match(/^\/approvals\/([a-f0-9]{12})$/);
+      if (req.method === "GET" && approvalKeyMatch) {
+        // Decision state for one approval key (404 until a decision is recorded).
+        const rec = await harness.snapshot(ApprovalDoc, approvalKeyMatch[1], ctx);
+        if (!rec) sendJson(res, 404, { error: `no decision recorded for ${approvalKeyMatch[1]}` });
+        else sendJson(res, 200, { key: approvalKeyMatch[1], decision: rec.decision, decidedBy: rec.decidedBy, decidedAt: rec.decidedAt, reason: rec.reason ?? null });
         return;
       }
 
@@ -687,6 +751,7 @@ export function createServer(deps: ServerDeps): http.Server {
     });
   }
 
+  server.on("close", () => clearInterval(sweepTimer));
   return server;
 }
 

@@ -115,12 +115,45 @@ function spawnServer(): ChildProcess {
   return proc;
 }
 
-async function waitReady(proc: ChildProcess): Promise<boolean> {
+/**
+ * A second, isolated server for the TTL test: its own data dir + a tiny
+ * APPROVAL_TTL_HOURS so pending approvals lapse within seconds.
+ */
+function spawnTtlServer(): { proc: ChildProcess; base: string } {
+  const ttlBase = mkdtempSync(path.join(tmpdir(), "engram-ttl-"));
+  const d = { data: path.join(ttlBase, "data"), work: path.join(ttlBase, "work"), kb: path.join(ttlBase, "kb"), config: path.join(ttlBase, "config") };
+  for (const dir of Object.values(d)) mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(d.config, "gates.json"), JSON.stringify({ tiers: [{ tool: "send_message", default: "prompt" }] }));
+  const port = 18932;
+  const proc = spawn("node", [path.join(APP_ROOT, "src", "main.ts")], {
+    env: {
+      ...process.env,
+      OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? pocEnv.OPENAI_BASE_URL,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? pocEnv.OPENAI_API_KEY,
+      API_TOKEN: TOKEN,
+      HOST: "127.0.0.1",
+      PORT: String(port),
+      DATA_DIR: d.data,
+      WORK_ROOT: d.work,
+      KB_DIR: d.kb,
+      CONFIG_DIR: d.config,
+      APPROVAL_TTL_HOURS: "0.001", // ~3.6 s — lapses almost immediately
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  serverLogs.set(proc, "");
+  proc.stdout?.on("data", (dd) => serverLogs.set(proc, (serverLogs.get(proc) ?? "") + String(dd)));
+  proc.stderr?.on("data", (dd) => serverLogs.set(proc, (serverLogs.get(proc) ?? "") + String(dd)));
+  servers.push(proc);
+  return { proc, base: `http://127.0.0.1:${port}` };
+}
+
+async function waitReady(proc: ChildProcess, base = BASE): Promise<boolean> {
   for (let i = 0; i < 60; i++) {
-    if (proc.exitCode !== null) throw new Error(`server spawn died early (code ${proc.exitCode}) — port conflict?`);
+    if (proc.exitCode !== null) throw new Error(`server spawn died early (code ${proc.exitCode}) — port conflict?\n` + (serverLogs.get(proc) ?? ""));
     try {
-      const r = await api("GET", "/ready");
-      if (r.status === 200 && r.json?.ready === true) return true;
+      const res = await fetch(`${base}/ready`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      if (res.status === 200 && ((await res.json().catch(() => null)) as any)?.ready === true) return true;
     } catch {
       // server not up yet
     }
@@ -174,8 +207,8 @@ class Stream {
   events: StreamEvent[] = [];
   private waiters: Array<() => void> = [];
 
-  constructor(conversationId: number, cursor = 0) {
-    const url = `${BASE}/stream?conversationId=${conversationId}&cursor=${cursor}`;
+  constructor(conversationId: number, cursor = 0, base = BASE) {
+    const url = `${base}/stream?conversationId=${conversationId}&cursor=${cursor}`;
     (async () => {
       const res = await fetch(url, { headers: { authorization: `Bearer ${TOKEN}` }, signal: this.controller.signal });
       if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
@@ -486,6 +519,66 @@ async function main() {
     );
   } else {
     check("allow-rule flow (skipped — no pending item)", false);
+  }
+
+  console.log("\n[7d] approval TTL auto-deny");
+  const ttl = spawnTtlServer();
+  if (!(await waitReady(ttl.proc, ttl.base))) {
+    check("ttl server ready", false, serverLogs.get(ttl.proc));
+  } else {
+    const tApi = async (method: string, p: string, body?: unknown) => {
+      const res = await fetch(`${ttl.base}${p}`, {
+        method,
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, json: (await res.json().catch(() => null)) as any };
+    };
+    const tStream = new Stream(1, 0, ttl.base);
+    const subTtl = (await tApi("POST", "/tasks", { content: 'Use the send_message tool to send erin@x.test the message "ttl probe". Then confirm.', requestId: "t-ttl-1" })).json?.submissionId as number;
+    check("ttl run completes (blocked)", await tStream.waitForRunEnd(subTtl, RUN_TIMEOUT));
+    check(
+      "send_message actually blocked pre-TTL",
+      tStream.toolResultTexts("send_message").some((t) => t.includes("BLOCKED")),
+    );
+    // Let the ~3.6 s TTL lapse plus sweep margin, then list: the request must be gone.
+    await new Promise((r) => setTimeout(r, 8_000));
+    const list = await tApi("GET", "/approvals");
+    check(
+      "expired approval no longer listed",
+      (list.json?.approvals ?? []).length === 0,
+      JSON.stringify(list.json),
+    );
+    // The key comes from the blocked tool result's marker in the transcript.
+    const entriesTtl = (await tApi("GET", "/conversations/1/entries?after=0&limit=300")).json?.entries ?? [];
+    const markerText =
+      entriesTtl
+        .flatMap((en: any) => en.model ?? [])
+        .map((m: any) => JSON.stringify(m))
+        .find((s: string) => s.includes("Approval request:")) ?? "";
+    // The marker sits inside a stringified message, so its quotes are backslash-escaped.
+    const keyM = markerText.match(/\\?"key\\?":\\?"([a-f0-9]{12})\\?"/);
+    check("marker found in transcript", Boolean(keyM));
+    if (keyM) {
+      const state = await tApi("GET", `/approvals/${keyM[1]}`);
+      check(
+        "durable ttl denial recorded",
+        state.status === 200 && state.json?.decision === "denied" && state.json?.decidedBy === "ttl",
+        JSON.stringify(state.json),
+      );
+      const notice = entriesTtl
+        .flatMap((en: any) => en.model ?? [])
+        .some(
+          (m: any) =>
+            m.role === "user" &&
+            String(typeof m.content === "string" ? m.content : JSON.stringify(m.content)).includes("expired after the approval TTL"),
+        );
+      check("conversation notified of expiry", notice);
+    } else {
+      check("ttl denial state (skipped — no marker)", false);
+      check("expiry notice (skipped — no marker)", false);
+    }
+    tStream.close();
   }
 
   console.log("\n[8] subagents: parallel delegate fan-out");

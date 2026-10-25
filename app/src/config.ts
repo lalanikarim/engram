@@ -48,6 +48,8 @@ export type AppConfig = {
   httpTools: HttpToolSpec[];
   /** Risk-tiered gate config (app/gates.json; legacy GATED_TOOLS fallback when absent). */
   gates: GatesConfig | null;
+  /** Pending approvals auto-deny after this many hours (APPROVAL_TTL_HOURS, default 24). */
+  approvalTtlHours: number;
   /** Podman sandbox for code-gen/test conversations (D12–13). */
   sandbox: {
     image: string;
@@ -97,6 +99,11 @@ export function loadConfig(): AppConfig {
         .filter(Boolean)
         .map((tool) => ({ tool })),
     },
+    // Invalid/missing TTL falls back to the 24 h default (never zero/negative in production).
+    approvalTtlHours: (() => {
+      const h = Number(process.env.APPROVAL_TTL_HOURS ?? 24);
+      return Number.isFinite(h) && h > 0 ? h : 24;
+    })(),
     sandbox: {
       image: process.env.SANDBOX_IMAGE ?? "docker.io/library/python:3.12-alpine",
       network: process.env.SANDBOX_NETWORK ?? "none",

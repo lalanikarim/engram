@@ -66,6 +66,15 @@ export function defaultRuleMatch(tool: string, args: unknown): Record<string, st
   return match;
 }
 
+/**
+ * TTL expiry (docs/plans/approvals.md, phase 3): a pending request is expired once it has
+ * been waiting longer than `ttlMs`. `pendingSince` comes from the marker entry's timestamp;
+ * an unknown time never expires (conservative — when in doubt, keep asking).
+ */
+export function isApprovalExpired(pendingSince: number | undefined, now: number, ttlMs: number): boolean {
+  return pendingSince !== undefined && now - pendingSince > ttlMs;
+}
+
 /** True when some rule matches this call (tool + every match field equal). */
 export function ruleMatches(rules: readonly ApprovalRule[], tool: string, args: unknown): boolean {
   const a = (args ?? {}) as Record<string, unknown>;
@@ -171,6 +180,15 @@ export function approvalHook(gates: CompiledGates) {
       const key = approvalKeyFor(call.name, call.arguments);
       const rec = await api.snapshot(ApprovalDoc, key, ctx);
       if (rec?.decision === "approved") return undefined; // allow
+      if (rec?.decision === "denied") {
+        // Already decided against (human or TTL): a hard stop, not a new request.
+        const by = rec.decidedBy ? ` by ${rec.decidedBy}` : "";
+        const why = rec.reason ? ` Reason given: \u201c${rec.reason}\u201d` : "";
+        return {
+          block:
+            `BLOCKED: \u201c${call.name}\u201d was DENIED${by}${why}. Do not retry this action; report that it was declined and adapt if possible.`,
+        };
+      }
       const marker = approvalMarker({ key, tool: call.name, args: call.arguments ?? {}, tier });
       const warning =
         tier === "destructive"
