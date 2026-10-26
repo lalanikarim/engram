@@ -4,6 +4,7 @@ import { createRegistry, defineExtension } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { AppConfig } from "./config.ts";
 import type { ModelsConfig } from "./model.ts";
+import { boardExtension } from "./extensions/board.ts";
 import { approvalHook, sendMessageTool } from "./extensions/approvals.ts";
 import { compileGates } from "./extensions/gates.ts";
 import { httpToolExtension } from "./extensions/http-tools.ts";
@@ -38,5 +39,6 @@ export function buildRegistry(config: AppConfig, modelsConfig: ModelsConfig) {
   if (config.httpTools.length > 0) {
     registry.install(httpToolExtension(config.httpTools));
   }
+  registry.install(boardExtension()); // shared board store + tools (Project 0, Phase 0a)
   return registry;
 }
