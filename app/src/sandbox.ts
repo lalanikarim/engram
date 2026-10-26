@@ -53,12 +53,20 @@ export class PodmanSandboxEnv {
   private network: string;
   private containerId: string;
   private inner: NodeExecutionEnv;
+  /** §5 item 7: approved base images for sandbox containers. */
+  private readonly allowImages: readonly string[];
+  /** §5 item 7: host paths sandbox mounts may source from. */
+  private readonly allowMountRoot: string;
   ready = false;
 
-  constructor(options: { workspace: string; image?: string; network?: string }) {
+  constructor(
+    options: { workspace: string; image?: string; network?: string; allowImages?: readonly string[]; allowMountRoot?: string },
+  ) {
     this.workspace = options.workspace; // absolute host path
     this.image = options.image ?? "docker.io/library/python:3.12-alpine";
     this.network = options.network ?? "none";
+    this.allowImages = options.allowImages ?? ["docker.io/library/python:3.12-alpine"];
+    this.allowMountRoot = options.allowMountRoot ?? this.workspace;
     this.containerId = `${CONTAINER_PREFIX}${randomBytes(4).toString("hex")}`;
     this.inner = new NodeExecutionEnv({ cwd: this.workspace });
     this.id = `podman:${this.containerId}`;
@@ -66,6 +74,13 @@ export class PodmanSandboxEnv {
 
   async init(context: Context): Promise<void> {
     mkdirSync(this.workspace, { recursive: true });
+    // §5 item 7 containment: only approved base images and mounts may be used.
+    if (!this.allowImages.includes(this.image)) {
+      throw new Error(`sandbox image not allowlisted: ${this.image} (allowed: ${this.allowImages.join(", ")})`);
+    }
+    if (this.workspace !== this.allowMountRoot && !this.workspace.startsWith(`${this.allowMountRoot}/`)) {
+      throw new Error(`sandbox workspace escapes allowlist root: ${this.workspace}`);
+    }
     await this.#podman(
       [
         "run", "-d", "--name", this.containerId,
@@ -102,6 +117,9 @@ export class PodmanSandboxEnv {
     context: Context,
   ): Promise<Result<ShellExecResult, ExecutionError>> {
     if (!this.ready) return err(new ExecutionError("spawn_error", "sandbox not initialized"));
+    if (!this.containerId.startsWith(CONTAINER_PREFIX)) {
+      return err(new ExecutionError("spawn_error", `container id not allowlisted: ${this.containerId}`));
+    }
     const timeoutResult = resolveTimeoutMs(options?.timeout);
     if (!timeoutResult.ok) return timeoutResult;
     const timeoutMs = timeoutResult.value;
@@ -333,11 +351,15 @@ export class SandboxManager {
   private harness: Harness | undefined;
   private cache = new Map<ConversationId, CachedSandbox>();
   private creating = new Map<ConversationId, Promise<PodmanSandboxEnv>>();
+  private readonly allowImages: readonly string[];
+  private readonly allowMountRoot: string;
 
-  constructor(options: { workRoot: string; image: string; network: string }) {
+  constructor(options: { workRoot: string; image: string; network: string; allowImages?: readonly string[]; allowMountRoot?: string }) {
     this.workRoot = options.workRoot;
     this.image = options.image;
     this.network = options.network;
+    this.allowImages = options.allowImages ?? ["docker.io/library/python:3.12-alpine"];
+    this.allowMountRoot = options.allowMountRoot ?? this.workRoot;
   }
 
   /** The harness is only needed once sandboxes actually spawn, which is after open(). */
@@ -368,7 +390,7 @@ export class SandboxManager {
   }
 
   async #spawn(dir: string, conversationId: ConversationId, context: Context): Promise<PodmanSandboxEnv> {
-    const env = new PodmanSandboxEnv({ workspace: dir, image: this.image, network: this.network });
+    const env = new PodmanSandboxEnv({ workspace: dir, image: this.image, network: this.network, allowImages: this.allowImages, allowMountRoot: this.allowMountRoot });
     await env.init(context);
     // Disposable per task: tear the container down when this conversation's run ends.
     // The watch must outlive the spawning call: watchEvents' stream lifetime is governed by its

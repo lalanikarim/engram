@@ -54,6 +54,10 @@ export type AppConfig = {
   sandbox: {
     image: string;
     network: string;
+    /** §5 item 7: approved base images for sandbox containers. */
+    allowImages?: string[];
+    /** §5 item 7: host paths sandbox mounts may source from. */
+    allowMountRoot?: string;
   };
   /** Telegram client (PLAN §4 D8–9). Null when TELEGRAM_BOT_TOKEN is unset. */
   telegram: {
@@ -107,6 +111,10 @@ export function loadConfig(): AppConfig {
     sandbox: {
       image: process.env.SANDBOX_IMAGE ?? "docker.io/library/python:3.12-alpine",
       network: process.env.SANDBOX_NETWORK ?? "none",
+      allowImages: process.env.SANDBOX_ALLOW_IMAGES
+        ? process.env.SANDBOX_ALLOW_IMAGES.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined,
+      allowMountRoot: process.env.SANDBOX_ALLOW_MOUNT_ROOT || undefined,
     },
     telegram: process.env.TELEGRAM_BOT_TOKEN
       ? {
