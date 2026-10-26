@@ -646,12 +646,33 @@ can't read shared secrets or escape its workspace.
 Verification: `tsc --noEmit` clean; board test **57/57**; sandbox-containment **5/5** on Podman;
 board-comms-live **3/3** and board-trust-live **4/4** still pass (no routing regression).
 
+### Collective — phase A4 ✅ COMPLETE (2026-10-25, `feature/collective-a4`)
+
+Standing team + coordinator triage (end-to-end), with heterogeneous-model support folded in. The coordinator
+(the root conversation) triages inbound work and routes it to the right specialist; the member does the work
+in its own workspace using domain memory and reports back — status lands on the board + dashboard.
+
+- `extensions/board.ts`: new `resolveMemberModel(models, callerModel, requested?)` helper (an explicit ref
+  validated against the catalog wins, else the caller's model). `create_member` gains an optional `model`
+  param so heterogeneous teams are possible via the tools (previously a member always inherited its creator's
+  model).
+- Heterogeneous members: the board store is model-agnostic — members on different models claim/route/report
+  identically.
+- `test/board.test.ts`: +9 checks (resolveMemberModel resolution/rejection; two members on different models
+  through claim/route/report) → **66/66**.
+- `test/board-team-live.test.ts` (new): end-to-end — the coordinator triages an open coding job, routes it to
+  the `coder` member, who claims it, writes add.py in its own workspace, and reports done; the board no longer
+  lists it as open. Skips cleanly without a local endpoint.
+
+Verification: `tsc --noEmit` clean; board test **66/66**; board-team-live **6/6** on Qwen3.8-27B.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
 phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phases A1 (domain memory),
-A2 (peer trust tier + untrusted peer input), and A3 (containment of a bad member) complete; phase A4 next
-(standing team + coordinator triage). Option B (Society) research continues on `feature/society-research`.
+A2 (peer trust tier + untrusted peer input), A3 (containment of a bad member), and A4 (standing team +
+coordinator triage, end-to-end) complete — the Collective MVP is DONE. Option B (Society) research continues
+on `feature/society-research`.
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

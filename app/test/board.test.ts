@@ -35,10 +35,12 @@ import {
   renderMemberMemory,
   renderPeerMessageUntrusted,
   reportStatusInTx,
+  resolveMemberModel,
   resolveRouteInTx,
   setMemberStatusInTx,
 } from "../src/extensions/board.ts";
 import { ConversationMeta } from "../src/meta.ts";
+import type { Models } from "@earendil-works/pi-ai";
 
 let passed = 0;
 let failed = 0;
@@ -69,15 +71,18 @@ writeFileSync(
         baseUrl: "http://127.0.0.1:9/v1",
         apiKey: "local-key",
         api: "openai-completions",
-        models: [{ id: "m-a", contextWindow: 4000, maxTokens: 500 }],
+        models: [
+          { id: "m-a", contextWindow: 4000, maxTokens: 500 },
+          { id: "m-b", contextWindow: 4000, maxTokens: 500 },
+        ],
       },
     },
   }),
 );
 const memberModel = { provider: "localbox", modelId: "m-a" };
+const memberModelB = { provider: "localbox", modelId: "m-b" }; // A4: a second, different model for heterogeneous members
 
-async function openHarness(dbPath: string) {
-  const { models } = await buildCatalog({ agentDir, env: {} });
+async function openHarness(dbPath: string, models: Models) {
   const registry = createRegistry();
   registry.install(boardExtension());
   const h = await Harness.open(
@@ -95,7 +100,8 @@ async function openHarness(dbPath: string) {
 
 async function main() {
   const dbPath = path.join(dataDir, "board.sqlite");
-  const h = await openHarness(dbPath);
+  const { models } = await buildCatalog({ agentDir, env: {} });
+  const h = await openHarness(dbPath, models);
 
   console.log("standing members + self-identity");
   const alphaConv = await h.commit((tx) => createMemberInTx(tx, { name: "alpha", model: memberModel }), ctx);
@@ -218,9 +224,30 @@ async function main() {
   check("sandboxed member is flagged for the Podman sidecar", (await h.snapshot(ConversationMeta, sbxConv, ctx))?.sandbox === true);
   check("non-sandboxed member is NOT flagged", (await h.snapshot(ConversationMeta, alphaConv, ctx))?.sandbox !== true);
 
+  console.log("heterogeneous members + model resolution (Collective A4)");
+  // resolveMemberModel: an explicit ref wins (validated), else the caller's model; bad refs are rejected.
+  check("explicit <provider>:<modelId> resolves to that model", JSON.stringify(resolveMemberModel(models, memberModel, "localbox:m-b")) === JSON.stringify(memberModelB));
+  check("bare unique id resolves to that model", JSON.stringify(resolveMemberModel(models, memberModel, "m-b")) === JSON.stringify(memberModelB));
+  check("falls back to the caller's model when none requested", resolveMemberModel(models, memberModel) === memberModel);
+  let threw = false; try { resolveMemberModel(models, memberModel, "localbox:nope"); } catch { threw = true; }
+  check("unknown model ref is rejected", threw);
+  threw = false; try { resolveMemberModel(models, null); } catch { threw = true; }
+  check("no caller model and no request is rejected", threw);
+  // Two members on DIFFERENT models run through the board identically (the store is model-agnostic).
+  const mAConv = await h.commit((tx) => createMemberInTx(tx, { name: "mA", model: memberModel }), ctx);
+  const mBConv = await h.commit((tx) => createMemberInTx(tx, { name: "mB", model: memberModelB, allowedTargets: ["mA"] }), ctx);
+  check("two members created on different models", mAConv !== undefined && mBConv !== undefined && mAConv !== mBConv);
+  await h.commit(
+    (tx) => postJobInTx(tx, { id: "job-het", title: "hetero work", requester: "coordinator", assignee: null, payload: {}, status: "open", claimedBy: null, result: null }),
+    ctx,
+  );
+  check("model-A member claims the job", (await h.commit((tx) => claimJobInTx(tx, "job-het", "mA"), ctx))?.assignee === "mA");
+  check("model-B member may route to model-A member (allowlist)", await h.commit((tx) => canRouteInTx(tx, "mB", "mA"), ctx));
+  check("model-A member reports done (store is model-agnostic)", (await h.commit((tx) => reportStatusInTx(tx, "job-het", "done", "ok"), ctx)).status === "done");
+
   console.log("durability across restart");
   await h.close(ctx);
-  const h2 = await openHarness(dbPath); // same file → resume existing state
+  const h2 = await openHarness(dbPath, models); // same file → resume existing state
   status = await h2.commit(async (tx) => readBoardStatusInTx(tx), ctx);
   check("members survive restart", status.members.some((m) => m.id === "alpha") && status.members.some((m) => m.id === "beta"));
   const doneJob = await h2.commit(async (tx) => readJobInTx(tx, "job-1"), ctx);
@@ -233,7 +260,7 @@ async function main() {
   // Containment (A3): a disabled member stays disabled across restart.
   await h2.commit((tx) => setMemberStatusInTx(tx, "beta", "disabled"), ctx);
   await h2.close(ctx);
-  const h3 = await openHarness(dbPath);
+  const h3 = await openHarness(dbPath, models);
   check("disabled status survives restart", await h3.commit((tx) => isDisabledInTx(tx, "beta"), ctx));
   await h3.close(ctx);
 
