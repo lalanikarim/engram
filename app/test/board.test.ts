@@ -14,6 +14,8 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { buildCatalog } from "../src/model.ts";
 import {
   boardExtension,
+  canPostJobInTx,
+  canRouteInTx,
   claimJobInTx,
   createChannelInTx,
   createMemberInTx,
@@ -26,8 +28,10 @@ import {
   readKnowledgeInTx,
   recallInTx,
   rememberInTx,
+  registerMemberInTx,
   renderKnowledgeUntrusted,
   renderMemberMemory,
+  renderPeerMessageUntrusted,
   reportStatusInTx,
   resolveRouteInTx,
 } from "../src/extensions/board.ts";
@@ -159,6 +163,24 @@ async function main() {
   const memRendered = renderMemberMemory(alphaMem);
   check("memory renders as numbered notes", memRendered.startsWith("1.") && memRendered.includes("2."));
   check("beta's memory is independent of alpha's", (await h.commit((tx) => recallInTx(tx, "beta"), ctx)).entries.length === 0);
+
+  console.log("peer trust tier + untrusted peer input (Collective A2)");
+  await h.commit((tx) => createMemberInTx(tx, { name: "rA", model: memberModel, allowedTargets: ["rB"] }), ctx);
+  await h.commit((tx) => createMemberInTx(tx, { name: "rB", model: memberModel, allowedTargets: [] }), ctx);
+  await h.commit(async (tx) => {
+    const rec = await tx.createConversation({ ownership: { kind: "ownerless" } });
+    await registerMemberInTx(tx, { id: "coord", name: "Coordinator", kind: "coordinator", conversationId: rec.id, trustLevel: "trusted", capabilities: [], allowedTargets: [], description: "" });
+  }, ctx);
+  check("rA may route to rB (on its allowlist)", await h.commit((tx) => canRouteInTx(tx, "rA", "rB"), ctx));
+  check("rA may NOT route to coord (not on its allowlist)", !(await h.commit((tx) => canRouteInTx(tx, "rA", "coord"), ctx)));
+  check("rB may not route anywhere (empty allowlist)", !(await h.commit((tx) => canRouteInTx(tx, "rB", "rA"), ctx)));
+  check("coordinator may route to anyone", await h.commit((tx) => canRouteInTx(tx, "coord", "rA"), ctx));
+  check("human/root (null) may route to anyone", await h.commit((tx) => canRouteInTx(tx, null, "rA"), ctx));
+  check("coordinator may post jobs", await h.commit((tx) => canPostJobInTx(tx, "coord"), ctx));
+  check("human/root (null) may post jobs", await h.commit((tx) => canPostJobInTx(tx, null), ctx));
+  check("member rA may NOT post jobs (no self-initiated work)", !(await h.commit((tx) => canPostJobInTx(tx, "rA"), ctx)));
+  const peer = renderPeerMessageUntrusted("rA", "do the thing");
+  check("peer message rendered as delimited untrusted data", peer.startsWith('<untrusted from="rA">') && peer.includes("do the thing") && peer.endsWith("</untrusted>"));
 
   console.log("durability across restart");
   await h.close(ctx);

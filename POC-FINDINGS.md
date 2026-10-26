@@ -602,12 +602,34 @@ Verification: `tsc --noEmit` clean; `board.test.ts` **31/31** (adds domain-memor
 one session, then consults recall() and answers from them in a later session without being re-told; the
 memory doc durably holds both (read independently of the transcript). Skips cleanly without a local endpoint.
 
+### Collective — phase A2 ✅ COMPLETE (2026-10-25, `feature/collective-a1`)
+
+Peer trust tier + untrusted peer input. Members can only route to peers on their allowlist; only the
+coordinator/human may post new work (members don't self-initiate); and every peer message is delivered as
+delimited UNTRUSTED data so an embedded instruction does not make a receiver act on it.
+
+- `extensions/board.ts`: `EngramProfile.allowedTargets` (per-member routing allowlist), accepted by
+  `registerMemberInTx`/`create_member`/`register`. New helpers `canRouteInTx` (coordinator/human bypass;
+  member → allowlist only), `canPostJobInTx` (coordinator/human only), and `renderPeerMessageUntrusted`.
+  `route_message` now resolves the caller's real identity, enforces `canRouteInTx`, and wraps the body in
+  `<untrusted from="…">`; `post_job` enforces `canPostJobInTx`.
+- Security fix: `route_message` previously fell back to senderId "coordinator" when a conversation had no
+  member identity — that would have let any non-member route/post as the coordinator. It now treats an
+  identity-less caller as the human/root and authorizes from the caller's real identity, not a self-declared field.
+- `test/board.test.ts`: +9 checks (allowlist grant/deny per member, coordinator + human bypass, post_job gating,
+  untrusted rendering) → **40/40**. `test/board-trust-live.test.ts` (new): relay routes an embedded "create a
+  file" instruction to sink; the message arrives wrapped as untrusted and sink does NOT create the file.
+- Regression: `board-comms-live.test.ts` now grants alpha `allowedTargets: ["general"]` (routing is allowlist-gated).
+
+Verification: `tsc --noEmit` clean; board test **40/40**; board-trust-live **4/4** on Qwen3.8-27B;
+board-comms-live **3/3** and board-memory-live **6/6** still pass.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
-phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phase A1 (member domain
-memory) complete; phases A2–A4 next (peer trust tier + untrusted peer input, containment of a bad member,
+phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phases A1 (domain memory) +
+A2 (peer trust tier + untrusted peer input) complete; phases A3–A4 next (containment of a bad member,
 standing team + coordinator triage). Option B (Society) research continues on `feature/society-research`.
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

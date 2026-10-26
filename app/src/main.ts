@@ -100,6 +100,7 @@ async function main() {
         conversationId,
         trustLevel: "trusted",
         capabilities: ["coordinate"],
+        allowedTargets: [],
         description: "The standing coordinator brain.",
       });
       return undefined;

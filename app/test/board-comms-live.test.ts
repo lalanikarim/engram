@@ -75,7 +75,8 @@ async function main() {
   );
   h.resume();
 
-  const alphaConv = await h.commit((tx) => createMemberInTx(tx, { name: "alpha", model: modelRef, tools: memberTools }), ctx);
+  // A2: routing is now allowlist-gated — grant alpha the right to route to "general".
+  const alphaConv = await h.commit((tx) => createMemberInTx(tx, { name: "alpha", model: modelRef, tools: memberTools, allowedTargets: ["general"] }), ctx);
   const chanConv = await h.commit((tx) => createChannelInTx(tx, { id: "general", name: "General", purpose: "team chatter" }), ctx);
 
   const alpha = await h.conversation(alphaConv, ctx);
