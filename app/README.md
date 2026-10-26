@@ -64,6 +64,9 @@ extension injection point are stable across versions; config fields are additive
 their own approval-gated tools through the existing gates mechanism. Covered by
 `test/core-instance.test.ts` (seam visibility, teardown/port release, two instances per process).
 
+Flows and the product-engineer reference live in [`docs/product-core-split.md`](../docs/product-core-split.md)
+(self-contained HTML edition: `product-core-split.html`).
+
 ## Web UI
 
 Open `http://HOST:PORT/` — a single-page app (Preact + htm, served from `node_modules`,
