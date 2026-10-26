@@ -14,11 +14,13 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { buildCatalog } from "../src/model.ts";
 import {
   boardExtension,
+  canGovernInTx,
   canPostJobInTx,
   canRouteInTx,
   claimJobInTx,
   createChannelInTx,
   createMemberInTx,
+  isDisabledInTx,
   memberIdentityOf,
   postJobInTx,
   publishKnowledgeInTx,
@@ -34,7 +36,9 @@ import {
   renderPeerMessageUntrusted,
   reportStatusInTx,
   resolveRouteInTx,
+  setMemberStatusInTx,
 } from "../src/extensions/board.ts";
+import { ConversationMeta } from "../src/meta.ts";
 
 let passed = 0;
 let failed = 0;
@@ -169,7 +173,7 @@ async function main() {
   await h.commit((tx) => createMemberInTx(tx, { name: "rB", model: memberModel, allowedTargets: [] }), ctx);
   await h.commit(async (tx) => {
     const rec = await tx.createConversation({ ownership: { kind: "ownerless" } });
-    await registerMemberInTx(tx, { id: "coord", name: "Coordinator", kind: "coordinator", conversationId: rec.id, trustLevel: "trusted", capabilities: [], allowedTargets: [], description: "" });
+    await registerMemberInTx(tx, { id: "coord", name: "Coordinator", kind: "coordinator", conversationId: rec.id, trustLevel: "trusted", capabilities: [], allowedTargets: [], status: "active", description: "" });
   }, ctx);
   check("rA may route to rB (on its allowlist)", await h.commit((tx) => canRouteInTx(tx, "rA", "rB"), ctx));
   check("rA may NOT route to coord (not on its allowlist)", !(await h.commit((tx) => canRouteInTx(tx, "rA", "coord"), ctx)));
@@ -181,6 +185,38 @@ async function main() {
   check("member rA may NOT post jobs (no self-initiated work)", !(await h.commit((tx) => canPostJobInTx(tx, "rA"), ctx)));
   const peer = renderPeerMessageUntrusted("rA", "do the thing");
   check("peer message rendered as delimited untrusted data", peer.startsWith('<untrusted from="rA">') && peer.includes("do the thing") && peer.endsWith("</untrusted>"));
+
+  console.log("containment of a bad member (Collective A3)");
+  // Governance: only the human/root or an active coordinator may disable/enable.
+  check("human/root may govern members", await h.commit((tx) => canGovernInTx(tx, null), ctx));
+  check("coordinator may govern members", await h.commit((tx) => canGovernInTx(tx, "coord"), ctx));
+  check("member rA may NOT govern (disable) others", !(await h.commit((tx) => canGovernInTx(tx, "rA"), ctx)));
+  // Central revoke: disable rA durably.
+  check("rA is active before revoke", !(await h.commit((tx) => isDisabledInTx(tx, "rA"), ctx)));
+  const revoked = await h.commit((tx) => setMemberStatusInTx(tx, "rA", "disabled"), ctx);
+  check("central revoke disables rA", revoked && (await h.commit((tx) => isDisabledInTx(tx, "rA"), ctx)));
+  // A disabled member is frozen from the board:
+  check("disabled rA may NOT route (send)", !(await h.commit((tx) => canRouteInTx(tx, "rA", "rB"), ctx)));
+  check("disabled rA may NOT post jobs", !(await h.commit((tx) => canPostJobInTx(tx, "rA"), ctx)));
+  check("cannot route TO disabled rA (coordinator)", !(await h.commit((tx) => canRouteInTx(tx, "coord", "rA"), ctx)));
+  check("cannot route TO disabled rA (human/root)", !(await h.commit((tx) => canRouteInTx(tx, null, "rA"), ctx)));
+  // A disabled member cannot claim an open job:
+  await h.commit(
+    (tx) => postJobInTx(tx, { id: "job-3", title: "work for rA", requester: "coordinator", assignee: null, payload: {}, status: "open", claimedBy: null, result: null }),
+    ctx,
+  );
+  check("disabled rA may NOT claim an open job", (await h.commit((tx) => claimJobInTx(tx, "job-3", "rA"), ctx)) === null);
+  check("active rB can still claim the job", (await h.commit((tx) => claimJobInTx(tx, "job-3", "rB"), ctx)) !== null);
+  // A disabled member cannot record memory:
+  check("disabled rA may NOT record memory", !(await h.commit((tx) => rememberInTx(tx, "rA", "should be blocked"), ctx)));
+  // Restore: re-enable rA.
+  const restored = await h.commit((tx) => setMemberStatusInTx(tx, "rA", "active"), ctx);
+  check("re-enable restores rA", restored && !(await h.commit((tx) => isDisabledInTx(tx, "rA"), ctx)));
+  check("restored rA may route again (on allowlist)", await h.commit((tx) => canRouteInTx(tx, "rA", "rB"), ctx));
+  // Containment wiring: a member created with sandbox:true is flagged for the Podman sidecar.
+  const sbxConv = await h.commit((tx) => createMemberInTx(tx, { name: "sbx", model: memberModel, sandbox: true }), ctx);
+  check("sandboxed member is flagged for the Podman sidecar", (await h.snapshot(ConversationMeta, sbxConv, ctx))?.sandbox === true);
+  check("non-sandboxed member is NOT flagged", (await h.snapshot(ConversationMeta, alphaConv, ctx))?.sandbox !== true);
 
   console.log("durability across restart");
   await h.close(ctx);
@@ -194,7 +230,12 @@ async function main() {
   check("knowledge post survives restart", (await h2.commit((tx) => readKnowledgeInTx(tx, "k1"), ctx))?.source === "web");
   const alphaMemAfter = await h2.commit((tx) => recallInTx(tx, "alpha"), ctx);
   check("member domain memory survives restart", alphaMemAfter.entries.length === 2 && alphaMemAfter.entries.some((e) => e.note.includes("blue-green")));
+  // Containment (A3): a disabled member stays disabled across restart.
+  await h2.commit((tx) => setMemberStatusInTx(tx, "beta", "disabled"), ctx);
   await h2.close(ctx);
+  const h3 = await openHarness(dbPath);
+  check("disabled status survives restart", await h3.commit((tx) => isDisabledInTx(tx, "beta"), ctx));
+  await h3.close(ctx);
 
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
   process.exit(failed === 0 ? 0 : 1);
