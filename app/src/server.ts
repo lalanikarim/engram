@@ -278,7 +278,9 @@ export function createServer(deps: ServerDeps): http.Server {
   // TTL sweeper: an initial pass after startup plus a periodic one. The period is bounded
   // so tiny test TTLs still sweep within seconds; production (24 h) sweeps every 5 min.
   const ttlMs = config.approvalTtlHours * 3_600_000;
+  let disposed = false;
   const sweep = () => {
+    if (disposed) return; // server closed (core close()); the interval is only unref'd, not cleared
     sweepExpiredApprovals(harness, ttlMs).catch((err) =>
       console.error(`[server] TTL sweep: ${String(err instanceof Error ? err.message : err)}`),
     );
@@ -808,7 +810,10 @@ export function createServer(deps: ServerDeps): http.Server {
     });
   }
 
-  server.on("close", () => clearInterval(sweepTimer));
+  server.on("close", () => {
+    disposed = true;
+    clearInterval(sweepTimer);
+  });
   return server;
 }
 

@@ -1,10 +1,9 @@
 // Registry assembly: all extensions installed for the harness, plus the root agent's
 // standing instructions.
-import { createRegistry, defineExtension } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, type Extension } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { AppConfig } from "./config.ts";
 import type { ModelsConfig } from "./model.ts";
-import { boardExtension } from "./extensions/board.ts";
 import { approvalHook, sendMessageTool } from "./extensions/approvals.ts";
 import { compileGates } from "./extensions/gates.ts";
 import { httpToolExtension } from "./extensions/http-tools.ts";
@@ -23,7 +22,11 @@ Working rules:
 - Verify multi-step work by actually running it (bash) before reporting success.
 - Be concise.`;
 
-export function buildRegistry(config: AppConfig, modelsConfig: ModelsConfig) {
+export function buildRegistry(
+  config: AppConfig,
+  modelsConfig: ModelsConfig,
+  extraExtensions: readonly Extension[] = [],
+) {
   const registry = createRegistry();
   registry.install(CodingTools); // scoped per conversation via the harness env cwd
   registry.install(defineExtension({ name: "web", tools: [webFetchTool()] }));
@@ -39,6 +42,7 @@ export function buildRegistry(config: AppConfig, modelsConfig: ModelsConfig) {
   if (config.httpTools.length > 0) {
     registry.install(httpToolExtension(config.httpTools));
   }
-  registry.install(boardExtension()); // shared board store + tools (Project 0, Phase 0a)
+  // Consumer extensions (issue #42): installed after the core set, before Harness.open.
+  for (const ext of extraExtensions) registry.install(ext);
   return registry;
 }

@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node test/model-catalog.test.ts && node test/gates.test.ts && node test/approval-rules.test.ts && node test/board.test.ts && node test/sandbox-containment.test.ts && node test/board-live.test.ts && node test/board-comms-live.test.ts && node test/board-memory-live.test.ts && node test/board-trust-live.test.ts && node test/board-approval-live.test.ts && node test/board-team-live.test.ts && node test/api.test.ts && node test/telegram.test.ts"
+    "test": "node test/model-catalog.test.ts && node test/gates.test.ts && node test/approval-rules.test.ts && node test/board.test.ts && node test/sandbox-containment.test.ts && node test/core-instance.test.ts && node test/board-live.test.ts && node test/board-comms-live.test.ts && node test/board-memory-live.test.ts && node test/board-trust-live.test.ts && node test/board-approval-live.test.ts && node test/board-team-live.test.ts && node test/api.test.ts && node test/telegram.test.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "1.3.0",

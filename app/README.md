@@ -49,6 +49,24 @@ node test/hardening.test.ts # 13 checks (D14; part B needs Podman): prompt-injec
                           # SIGKILL mid-run in a sandboxed conversation → orphan sweep → resume
 ```
 
+## Composable core (issue #42)
+
+The instance construction is exported as a public seam so external projects can build on the
+engram core as a pinned component instead of forking it: `createCoreInstance()` in
+[`src/core.ts`](src/core.ts) assembles config → model catalog → registry → harness → root
+conversation → HTTP server, and accepts `extraExtensions` (plain pi-durable extension objects,
+installed before `Harness.open`), optional `host`/`port` (`0` = ephemeral, actual port returned),
+and a deterministic idempotent `close()`. `loadConfig(overrides?)` supplies per-instance config.
+`src/main.ts` is the product composition on top (board registration, Telegram client, shutdown
+wiring) — standalone behavior is unchanged. Stability contract: the instance lifecycle and the
+extension injection point are stable across versions; config fields are additive. Note that
+`extraExtensions` run with full core privilege — consequential consumer actions should register
+their own approval-gated tools through the existing gates mechanism. Covered by
+`test/core-instance.test.ts` (seam visibility, teardown/port release, two instances per process).
+
+Flows and the product-engineer reference live in [`docs/product-core-split.md`](../docs/product-core-split.md)
+(self-contained HTML edition: `product-core-split.html`).
+
 ## Web UI
 
 Open `http://HOST:PORT/` — a single-page app (Preact + htm, served from `node_modules`,

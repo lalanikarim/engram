@@ -666,6 +666,34 @@ in its own workspace using domain memory and reports back — status lands on th
 
 Verification: `tsc --noEmit` clean; board test **66/66**; board-team-live **6/6** on Qwen3.8-27B.
 
+### Composable core instance (issue #42) ✅ COMPLETE (2026-10-26, `refactor/core-instance`)
+
+The core is now usable as a pinned component by external projects (consumer: drydock's
+multi-repo software factory — one engram instance per managed repo). Product/core split:
+
+- New `src/core.ts` (public seam): `createCoreInstance({config, modelsConfig?, extraExtensions?,
+  host?, port?, rootAgent?, rootInit?}) → {harness, server, actualPort, rootConversationId, close}`.
+  `extraExtensions` are plain pi-durable extensions installed after the core set, before
+  `Harness.open`; `port: 0` = ephemeral (actual port returned); `close()` is deterministic and
+  idempotent (server → sandbox disposeAll → harness close). Stability contract documented in the
+  module header + README: lifecycle and injection point stable, config fields additive.
+- `src/main.ts` is now the product composition: board registration (`extraExtensions:
+  [boardExtension()]`), root instructions, Telegram client, shutdown wiring. Standalone CLI/env
+  behavior unchanged; board tools are no longer a bare-core default (consumers don't inherit them).
+- `buildRegistry(config, modelsConfig, extraExtensions?)` — board install moved out of the core set.
+- `loadConfig(overrides?: Partial<AppConfig>)` for per-instance config without touching process env.
+- `test/core-instance.test.ts` (new, 11 checks): probe extension visible to the root agent,
+  core tools intact, board absent from bare core, /health on actualPort, idempotent close + port
+  release (rebind), two instances in one process with distinct stores/ports and no cross-instance leak.
+- Test hermeticity fix (pre-existing): the six `board-*-live` suites read the endpoint creds from
+  poc/.env for discovery but pi-ai's env provider resolves the key from `process.env` at generation
+  time — in a clean shell every live run settled `unanswered` ("Provider is not configured: aurora").
+  Each suite now sets `process.env.OPENAI_* ??=` from its resolved values.
+
+Verification: `tsc --noEmit` clean; full `npm test` green in a clean env (all suites pass;
+board-trust-live showed one model-dependent flake on the first run — relay did not call
+route_message — and passed 4/4 on re-run).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
