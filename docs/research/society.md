@@ -3,8 +3,9 @@
 **Status:** research / brainstorming. Companion to [engram-ecosystem.md](engram-ecosystem.md) and
 [board.md](board.md). Option A (Collective) is designed in `board.md` and planned in
 [`../plans/project-0-board.md`](../plans/project-0-board.md); this thread develops **Option B as a
-separate project on the same core engram unit**. Design points below carry a *lean/recommendation*;
-the open decisions at the bottom need the owner's call before this becomes a build plan.
+separate project on the same core engram unit**. Option A (Collective) is now **complete on main**
+(board P0 + A1–A4); the confirmed decisions below are turned into a phased build plan in
+[`../plans/society.md`](../plans/society.md).
 
 ## Working definition
 Beyond a bounded team: an **open population** of agents with more lateral autonomy — roles/relations
