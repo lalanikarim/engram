@@ -20,6 +20,7 @@ import {
   memberIdentityOf,
   postJobInTx,
   publishKnowledgeInTx,
+  readBoardDashboard,
   readBoardStatusInTx,
   readJobInTx,
   readKnowledgeInTx,
@@ -131,6 +132,18 @@ async function main() {
   check("knowledge stored with provenance + trust tier", k !== null && k.source === "web" && k.trustTier === "untrusted" && k.authorId === "alpha");
   const rendered = k ? renderKnowledgeUntrusted(k) : "";
   check("knowledge body rendered as delimited untrusted data", rendered.includes("<untrusted") && rendered.includes("peer said X") && rendered.includes("</untrusted>"));
+
+  console.log("board dashboard assembly (Phase 0d)");
+  await h.commit(
+    (tx) => postJobInTx(tx, { id: "job-2", title: "open work", requester: "coordinator", assignee: null, payload: {}, status: "open", claimedBy: null, result: null }),
+    ctx,
+  );
+  const dash = await readBoardDashboard(h, ctx);
+  check("dashboard lists members", dash.members.some((m) => m.id === "alpha") && dash.members.some((m) => m.id === "beta"));
+  check("dashboard lists the open job", dash.openJobs.some((j) => j.id === "job-2"));
+  check("dashboard omits the done job", !dash.openJobs.some((j) => j.id === "job-1"));
+  check("dashboard lists the channel", dash.channels.some((c) => c.id === "general"));
+  check("dashboard lists the knowledge post", dash.knowledge.some((k2) => k2.id === "k1"));
 
   console.log("durability across restart");
   await h.close(ctx);

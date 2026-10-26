@@ -363,6 +363,13 @@ export class TelegramClient {
       return;
     }
 
+    // /board command: the shared board dashboard (members, open jobs, pending approvals).
+    const boardCmd = text.match(/^\/board\s*$/);
+    if (boardCmd) {
+      await this.handleBoardCommand(msg.chat.id, msg.message_thread_id);
+      return;
+    }
+
     const key = chatKey(msg.chat.id, msg.message_thread_id);
     let binding = this.state.chats[key];
     if (!binding) {
@@ -442,26 +449,56 @@ export class TelegramClient {
           conversationId: number;
         }>;
       };
-      // Only conversations this bot owns; group unposted items per conversation.
+      // Conversations this bot owns, keyed by conversation id. Approvals from unbound
+      // conversations (e.g. board members) route to the human's root chat so they stay actionable.
       const mine = new Map<number, string>();
       for (const [k, b] of Object.entries(this.state.chats)) mine.set(b.conversationId, k);
-      const byConv = new Map<number, typeof body.approvals>();
+      const rootKey = Object.entries(this.state.chats).find(([, b]) => b.kind === "root")?.[0];
+      const byTarget = new Map<string, typeof body.approvals>();
       for (const a of body.approvals) {
-        if (!mine.has(a.conversationId) || this.postedKeys.has(a.key)) continue;
-        const list = byConv.get(a.conversationId) ?? [];
+        if (this.postedKeys.has(a.key)) continue;
+        // Target chat: the bound chat for owned conversations, else the root chat for unbound ones.
+        const targetKey = mine.get(a.conversationId) ?? rootKey;
+        if (!targetKey) continue;
+        const list = byTarget.get(targetKey) ?? [];
         list.push(a);
-        byConv.set(a.conversationId, list);
+        byTarget.set(targetKey, list);
       }
-      for (const [convId, items] of byConv) {
-        const chatKey = mine.get(convId)!;
+      for (const [chatKey, items] of byTarget) {
         // Destructive items are ALWAYS individual — never batched.
-        for (const a of items.filter((x) => x.tier === "destructive")) await this.postSingle(a, chatKey, convId);
+        for (const a of items.filter((x) => x.tier === "destructive")) await this.postSingle(a, chatKey, a.conversationId);
         const promptItems = items.filter((x) => x.tier !== "destructive");
-        if (promptItems.length === 1) await this.postSingle(promptItems[0], chatKey, convId);
-        else if (promptItems.length >= 2) await this.postBallot(promptItems, chatKey, convId);
+        if (promptItems.length === 1) await this.postSingle(promptItems[0], chatKey, promptItems[0].conversationId);
+        else if (promptItems.length >= 2) await this.postBallot(promptItems, chatKey, promptItems[0].conversationId);
       }
     } catch (e) {
       console.error("[telegram] approvals:", errText(e));
+    }
+  }
+
+  /** /board command: the shared board dashboard (members, open jobs, pending approvals). */
+  private async handleBoardCommand(chatId: number, threadId?: number): Promise<void> {
+    const target = { chat_id: chatId, ...(threadId ? { message_thread_id: threadId } : {}) };
+    try {
+      const res = await fetch(`${this.opts.apiBaseUrl}/board`, { headers: { authorization: `Bearer ${this.opts.apiToken}` } });
+      if (!res.ok) throw new Error(`board fetch failed: ${res.status}`);
+      const body = (await res.json()) as {
+        members?: Array<{ name: string; kind: string }>;
+        openJobs?: Array<{ id: string; title: string }>;
+        pendingApprovals?: unknown[];
+      };
+      const lines: string[] = ["📋 Board"];
+      const members = body.members ?? [];
+      lines.push(`Members (${members.length}): ${members.length ? members.map((m) => `${m.name} [${m.kind}]`).join(", ") : "none"}`);
+      const jobs = body.openJobs ?? [];
+      if (jobs.length === 0) lines.push("Open jobs: none");
+      else for (const j of jobs.slice(0, 15)) lines.push(`• ${j.id}: ${j.title}`);
+      const pending = body.pendingApprovals ?? [];
+      lines.push(pending.length ? `⏳ Pending approvals: ${pending.length}` : "No pending approvals");
+      await this.tg("sendMessage", { ...target, text: lines.join("\n") });
+    } catch (e) {
+      console.error("[telegram] board:", errText(e));
+      await this.tg("sendMessage", { ...target, text: "Could not load the board." }).catch(() => {});
     }
   }
 

@@ -330,10 +330,28 @@ function ApprovalsBanner({ approvals, onDecided }) {
 
 // ---- shell: sidebar + chat + approvals ----
 
+// ---- board dashboard (polls GET /board) ----
+function BoardPanel({ board }) {
+  const members = board?.members ?? [];
+  const openJobs = board?.openJobs ?? [];
+  return html`<div class="board-section">
+    <div class="side-head"><span>Board</span><span class="badge">${openJobs.length} open</span></div>
+    <div class="board-list">
+      <div class="board-group">Members (${members.length})</div>
+      ${members.map((m) => html`<div class="board-row"><span>${m.name}</span><span class="badge">${m.kind}</span></div>`)}
+      <div class="board-group">Open jobs</div>
+      ${openJobs.length
+        ? openJobs.map((j) => html`<div class="board-row"><span>${j.id} — ${j.title}</span></div>`)
+        : html`<div class="board-row dim">none</div>`}
+    </div>
+  </div>`;
+}
+
 function Shell({ onLogout }) {
   const [convs, setConvs] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [approvals, setApprovals] = useState([]);
+  const [board, setBoard] = useState(null);
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
 
@@ -367,6 +385,19 @@ function Shell({ onLogout }) {
     return () => clearInterval(t);
   }, [onLogout]);
 
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        setBoard(await api("/board"));
+      } catch (err) {
+        if (err instanceof AuthError) onLogout();
+      }
+    };
+    void poll();
+    const t = setInterval(() => void poll(), 5000);
+    return () => clearInterval(t);
+  }, [onLogout]);
+
   const active = convs.find((c) => c.id === activeId) ?? null;
 
   const newConv = async () => {
@@ -395,6 +426,7 @@ function Shell({ onLogout }) {
           </div>
         </div>`)}
       </div>
+      <${BoardPanel} board=${board} />
       <div class="new-conv">
         <input placeholder="Name (optional)" value=${name} onInput=${(e) => setName(e.target.value)} />
         <input placeholder="cwd under work/ (optional)" value=${cwd} onInput=${(e) => setCwd(e.target.value)}

@@ -332,6 +332,53 @@ export function renderKnowledgeUntrusted(post: KnowledgePost): string {
   return `<untrusted source="${post.source}" author="${post.authorType}:${post.authorId}" tier="${post.trustTier}">\n${post.body}\n</untrusted>`;
 }
 
+/** List all channels. */
+export async function listChannelsInTx(tx: Tx): Promise<Channel[]> {
+  const idx = await tx.doc(ChannelIndexDoc);
+  const out: Channel[] = [];
+  for (const id of idx.ids) {
+    const d = await tx.doc(ChannelDoc, id, {});
+    if (d.id !== "") out.push({ ...d });
+  }
+  return out;
+}
+
+/** The full board dashboard: members + open jobs + channels + knowledge. */
+export type BoardDashboard = { members: EngramProfile[]; openJobs: Job[]; channels: Channel[]; knowledge: KnowledgePost[] };
+
+/**
+ * Read the board dashboard via snapshots (read-only). Snapshots are used rather than a commit
+ * because a doc-reading commit can stall on finalization in the HTTP handler while the SSE
+ * watcher is live (verified during Phase 0d); snapshots resolve cleanly there.
+ */
+export async function readBoardDashboard(reader: DocumentReader, ctx: Context): Promise<BoardDashboard> {
+  const engIdx = await reader.snapshot(EngramIndexDoc, ctx);
+  const members: EngramProfile[] = [];
+  for (const id of engIdx?.ids ?? []) {
+    const d = await reader.snapshot(EngramDoc, id, ctx);
+    if (d) members.push({ ...d });
+  }
+  const jobIdx = await reader.snapshot(JobIndexDoc, ctx);
+  const openJobs: Job[] = [];
+  for (const id of jobIdx?.open ?? []) {
+    const j = await reader.snapshot(JobDoc, id, ctx);
+    if (j && j.status === "open") openJobs.push({ ...j });
+  }
+  const chIdx = await reader.snapshot(ChannelIndexDoc, ctx);
+  const channels: Channel[] = [];
+  for (const id of chIdx?.ids ?? []) {
+    const d = await reader.snapshot(ChannelDoc, id, ctx);
+    if (d && d.id !== "") channels.push({ ...d });
+  }
+  const kIdx = await reader.snapshot(KnowledgeIndexDoc, ctx);
+  const knowledge: KnowledgePost[] = [];
+  for (const id of kIdx?.ids ?? []) {
+    const d = await reader.snapshot(KnowledgeDoc, id, ctx);
+    if (d && d.id !== "") knowledge.push({ ...d });
+  }
+  return { members, openJobs, channels, knowledge };
+}
+
 // ---- Tools -------------------------------------------------------------------
 
 const registerTool = defineTool({
