@@ -518,11 +518,30 @@ Verification: `tsc --noEmit` clean; board test 6/6; live smoke start reaches `re
 board extension installed and the coordinator registered during root creation. Claim/report,
 standing members, routing/comms, and knowledge exchange are phases 0b–0d (next).
 
+### Board P0 — phase 0b ✅ COMPLETE (2026-10-25, `feature/board-0b`)
+
+Claim + member work loop. Members now act under **self-identity** (req 5): a conversation-scoped
+`board.memberId` doc maps each member's conversation to its board id, so `claim_job`/
+`report_status` resolve "me" without the caller passing it by hand.
+
+- `extensions/board.ts`: `claim_job` (atomic single-winner), `report_status`, and
+  `create_member` (spawns a standing named member — own ownerless conversation + workspace
+  `cwd` + tools — registers it, and sets its identity). Core helpers `claimJobInTx`/
+  `reportStatusInTx`/`createMemberInTx`/`readJobInTx`/`memberIdentityOf`.
+- `test/board.test.ts`: extended to cover member creation, self-identity resolution, atomic
+  single-winner claim (second claim blocked), report_status, and durability across restart.
+- `test/board-live.test.ts`: live work loop — a member claims a job (self-identity), writes a
+  file in its own workspace, reports done; the job doc reflects done+result. Skips cleanly
+  without a local endpoint.
+
+Verification: `tsc --noEmit` clean; board test 12/12; board-live 6/6 on Qwen3.8-27B (member run
+~4s). Routing/comms and knowledge exchange are phases 0c–0d (next).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
-phase 0a complete, phases 0b–0d next. Option A (Collective) and Option B (Society) research
+phases 0a–0b complete, phases 0c–0d next (routing/comms, knowledge, client surfaces + approval routing). Option A (Collective) and Option B (Society) research
 continue on separate branches (`feature/society-research`).
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.
