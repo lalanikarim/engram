@@ -17,7 +17,7 @@
 // route_message/post_job) and delivers peer messages as untrusted data.
 import { createHash } from "node:crypto";
 import type { Context, JsonValue } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import { Type, type Models } from "@earendil-works/pi-ai";
 import {
   configure,
   defineDoc,
@@ -33,6 +33,7 @@ import {
   type Tx,
 } from "@earendil-works/pi-durable";
 import { ConversationMeta } from "../meta.ts";
+import { parseModelRef } from "../model.ts";
 
 // ---- Board doc definitions (session-scoped) ----------------------------------
 
@@ -302,6 +303,16 @@ export async function createMemberInTx(tx: Tx, spec: CreateMemberSpec): Promise<
   const ident = await tx.doc(MemberIdDoc, rec.id);
   ident.memberId = spec.name;
   return rec.id;
+}
+
+/**
+ * Resolve the model for a new member: an explicit ref (validated against the catalog) if requested,
+ * else the caller's own model. Enables heterogeneous teams — different members on different models.
+ */
+export function resolveMemberModel(models: Models, callerModel: ModelRef | null | undefined, requested?: string): ModelRef {
+  if (requested) return parseModelRef(models, requested);
+  if (!callerModel) throw new Error("no model available to give the member");
+  return callerModel;
 }
 
 /** Resolve a member id from a conversation's identity doc (null if not a registered member). */
@@ -624,14 +635,19 @@ const createMemberTool = defineTool({
     name: Type.String({ description: "Unique member name/id." }),
     capabilities: Type.Optional(Type.Array(Type.String())),
     allowedTargets: Type.Optional(Type.Array(Type.String())),
+    model: Type.Optional(Type.String({ description: "Optional model ref (<provider>:<modelId> or a unique id) for this member — enables heterogeneous teams. Defaults to the caller's model." })),
     sandbox: Type.Optional(Type.Boolean({ description: "Route this member's code execution into the per-member Podman sandbox (containment)." })),
     instructions: Type.Optional(Type.String()),
   }),
   replay: "unsafe",
   execute: async (args, api, ctx) => {
     const agent = await api.agent(ctx);
-    const model = agent.model;
-    if (!model) return { output: [{ type: "text" as const, text: "no model available to give the member" }] };
+    let model: ModelRef;
+    try {
+      model = resolveMemberModel(api.models, agent.model, args.model);
+    } catch (e) {
+      return { output: [{ type: "text" as const, text: `cannot assign model to member: ${(e as Error).message}` }] };
+    }
     // Default member tool set: board member tools + file/shell (not coordinator-only register/post_job).
     const wanted = new Set(["claim_job", "report_status", "board_status", "recall", "remember", "read", "write", "edit", "bash"]);
     const tools = api.registry.tools().map((t) => t.tool).filter((t) => wanted.has(t.name));
