@@ -8,6 +8,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
+import { registerMemberInTx } from "./extensions/board.ts";
 import { ConversationMeta } from "./meta.ts";
 import { defaultModelRef, formatModelRef, loadModelsConfig } from "./model.ts";
 import { buildRegistry, ROOT_INSTRUCTIONS } from "./registry.ts";
@@ -91,6 +92,16 @@ async function main() {
       const d = await tx.doc(ConversationMeta, conversationId);
       if (!d.name) d.name = "root";
       d.createdAt = Date.now();
+      // Register the coordinator as a board member (deterministic, at creation).
+      await registerMemberInTx(tx, {
+        id: "coordinator",
+        name: "coordinator",
+        kind: "coordinator",
+        conversationId,
+        trustLevel: "trusted",
+        capabilities: ["coordinate"],
+        description: "The standing coordinator brain.",
+      });
       return undefined;
     },
   });

@@ -498,10 +498,31 @@ auto-deny (`decidedBy: "ttl"`) and the owning conversation is notified.
 Verification: unit TTL checks in `approval-rules.test.ts` (18/18); live api `[7d]` all pass
 (blocked → lapsed → gone from list → durable `ttl` denial → notified).
 
+### Board P0 — phase 0a ✅ COMPLETE (2026-10-25, `feature/board-p0`)
+
+The shared board store (Project 0) lands in `app/`: a session-scoped coordination store any
+conversation can read/write through atomic `api.commit` transactions. This is the "broker"
+half of the board — the durable system of record — with the coordinator conversation on top
+(`docs/research/board.md`, `docs/plans/project-0-board.md`).
+
+- `extensions/board.ts`: doc families `board.engram` (member profiles) + `board.job` (jobs),
+  index singletons (`board.engramIndex`/`board.jobIndex`) for enumeration (pi-durable has no
+  doc-family scan), commit-level helpers (`registerMemberInTx`/`postJobInTx`/
+  `readBoardStatusInTx`), and the `register`/`post_job`/`board_status` tools.
+- `registry.ts`: installs the board extension (the coordinator picks up the tools by default).
+- `main.ts`: registers the coordinator as a board member on root creation.
+- `test/board.test.ts`: deterministic store test — register/post/read, idempotency-on-id, and
+  durability across restart (close + reopen); wired into the npm test script.
+
+Verification: `tsc --noEmit` clean; board test 6/6; live smoke start reaches `ready` with the
+board extension installed and the coordinator registered during root creation. Claim/report,
+standing members, routing/comms, and knowledge exchange are phases 0b–0d (next).
+
 ### Not yet done
 
-Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
-container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
-host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
+Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
+the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
+phase 0a complete, phases 0b–0d next. Option A (Collective) and Option B (Society) research
+continue on separate branches (`feature/society-research`).
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.
