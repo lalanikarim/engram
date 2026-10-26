@@ -40,6 +40,8 @@ async function main() {
     workRoot: config.workRoot,
     image: config.sandbox.image,
     network: config.sandbox.network,
+    allowImages: config.sandbox.allowImages,
+    allowMountRoot: config.sandbox.allowMountRoot,
   });
   const envFor = async (target: EnvTarget, context: Context) => {
     const dir = target.cwd ? path.join(config.workRoot, target.cwd) : config.workRoot;
