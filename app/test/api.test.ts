@@ -625,7 +625,7 @@ async function main() {
   }
   const badBatch2 = await api("POST", "/approvals/batch", { keys: [], decision: "approved" });
   check("batch empty keys → 400", badBatch2.status === 400);
-  const badBatch3 = await api("POST", "/approvals/batch", { keys: ["zzzzzzzzzzzz"], decision: "approved" });
+  const badBatch3 = await api("POST", "/approvals/batch", { keys: ["deadbeefdead"], decision: "approved" });
   check("batch unknown key → not_found", badBatch3.status === 200 && badBatch3.json?.results?.[0]?.status === "not_found", JSON.stringify(badBatch3.json));
 
   console.log("\n[8] subagents: parallel delegate fan-out");

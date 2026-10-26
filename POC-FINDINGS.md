@@ -503,5 +503,5 @@ Verification: unit TTL checks in `approval-rules.test.ts` (18/18); live api `[7d
 Post-MVP follow-up from the D14 checklist: item 7 container packaging (unprivileged agent
 container, engine socket kept out of it, scoped podman wrapper in a 2-service compose,
 host firewall rules). The Web UI model picker is not built (the API surface for it is ready).
-Next planned work: smarter approvals phase 4 (batching) — phases 1–3 done.
+Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

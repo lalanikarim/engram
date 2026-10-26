@@ -1,6 +1,6 @@
 # Smarter approvals — risk tiers, persistent rules, destructive guard
 
-Status: **phases 1–3 implemented** (2026-10-25); phase 4 pending. Decisions recorded from discussion with the owner.
+Status: **phases 1–4 implemented** (2026-10-25); phase 5 pending (deferred — classifier scoring). Decisions recorded from discussion with the owner.
 
 ## Current state (what works, what's dumb)
 
