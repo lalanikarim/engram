@@ -47,6 +47,11 @@ function readPocEnv(): Record<string, string> {
 const pocEnv = readPocEnv();
 const baseUrl = process.env.OPENAI_BASE_URL ?? pocEnv.OPENAI_BASE_URL;
 const apiKey = process.env.OPENAI_API_KEY ?? pocEnv.OPENAI_API_KEY;
+
+// Generation resolves the env provider's key from process.env (pi-ai envApiKeyAuth),
+// so the vars must be ambient even when sourced from poc/.env — keeps the suite hermetic.
+process.env.OPENAI_BASE_URL ??= baseUrl;
+process.env.OPENAI_API_KEY ??= apiKey;
 if (!baseUrl || !apiKey) {
   console.log("board-trust-live: no OPENAI_BASE_URL/OPENAI_API_KEY — skipping live peer-trust test");
   process.exit(0);

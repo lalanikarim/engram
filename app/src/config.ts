@@ -73,7 +73,12 @@ function resolveDir(value: string | undefined, fallback: string): string {
   return path.isAbsolute(v) ? v : path.join(APP_ROOT, v);
 }
 
-export function loadConfig(): AppConfig {
+/**
+ * Load config from env + declarative JSON. `overrides` (issue #42) lets consumers of
+ * the composable core supply per-instance values (data dirs, port, …) without touching
+ * process env; unspecified fields keep their env/defaults.
+ */
+export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const token = process.env.API_TOKEN;
   if (!token) throw new Error("API_TOKEN env var is required (see app/.env.example)");
   const configDir = resolveDir(process.env.CONFIG_DIR, ".");
@@ -82,7 +87,7 @@ export function loadConfig(): AppConfig {
   const httpTools = readJson<HttpToolSpec[]>(path.join(configDir, "tools.json"), []);
   for (const spec of httpTools) validateHttpToolSpec(spec);
 
-  return {
+  const config: AppConfig = {
     host: process.env.HOST ?? "127.0.0.1",
     port: Number(process.env.PORT ?? 8791),
     token,
@@ -128,6 +133,8 @@ export function loadConfig(): AppConfig {
         }
       : null,
   };
+
+  return { ...config, ...overrides };
 }
 
 function readJson<T>(file: string, fallback: T): T {
