@@ -1,5 +1,9 @@
 # Product/Core Split — Flows & Product-Engineer Reference
 
+> **Superseded (flows):** the flow sections below are reframed under the fleet paradigm in
+> [`ecosystem-flows.md`](ecosystem-flows.md) (Solo / Collective / Society / drydock). This file
+> remains the PR #43 record for the seam API (`createCoreInstance` reference, §6).
+
 **Status:** reference documentation for [PR #43](https://github.com/lalanikarim/engram/pull/43)
 (composable core instance, issue [#42](https://github.com/lalanikarim/engram/issues/42)).
 Companion to [`research/board.md`](research/board.md) (Collective), [`research/society.md`](research/society.md)

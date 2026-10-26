@@ -694,6 +694,17 @@ Verification: `tsc --noEmit` clean; full `npm test` green in a clean env (all su
 board-trust-live showed one model-dependent flake on the first run — relay did not call
 route_message — and passed 4/4 on re-run).
 
+### Ecosystem flows reference (docs-only) ✅ COMPLETE (2026-10-26, `docs/ecosystem-flows`)
+
+Reframed the ecosystem under the **fleet paradigm**: engram core = kernel only; apps compose it via
+`createCoreInstance`. Documented that a Collective member is either an **M1 in-harness skill brain**
+(conversation) or an **M2 federated project brain** (its own instance); the board owner stays the
+single writer and federation is exactly-once RPC to it, not doc sync. Drydock is documented as a
+Collective specialized to repos; Society as the fleet + governance extension (kernel change only at
+B6 if multi-human approval routing demands it). Delivered `docs/ecosystem-flows.md` (+ self-contained
+HTML edition with inlined SVGs); `product-core-split.md` now points to it as the current flow
+reference. No code changes.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
