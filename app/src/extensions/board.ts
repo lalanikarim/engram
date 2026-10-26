@@ -13,6 +13,8 @@
 // conversations) and knowledge exchange (publish_knowledge with provenance +
 // trust tier, rendered as untrusted data). Collective phase A1 adds per-member
 // domain memory (board.memberMemory + recall/remember tools) that survives compaction.
+// Phase A2 adds the peer trust tier (per-member routing allowlists gating
+// route_message/post_job) and delivers peer messages as untrusted data.
 import { createHash } from "node:crypto";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
@@ -42,6 +44,8 @@ export type EngramProfile = {
   conversationId: number;
   trustLevel: "trusted" | "untrusted";
   capabilities: string[];
+  /** Member/channel ids this member may route to (peer allowlist). Coordinator + human bypass. */
+  allowedTargets: string[];
   description: string;
 };
 
@@ -64,7 +68,7 @@ const EngramDoc = defineDocFamily<EngramProfile, JsonValue>({
   scope: "session",
   kind: "board.engram",
   version: 1,
-  initial: () => ({ id: "", name: "", kind: "member", conversationId: 0, trustLevel: "untrusted", capabilities: [], description: "" }),
+  initial: () => ({ id: "", name: "", kind: "member", conversationId: 0, trustLevel: "untrusted", capabilities: [], allowedTargets: [], description: "" }),
 });
 
 const JobDoc = defineDocFamily<Job, JsonValue>({
@@ -181,6 +185,7 @@ export async function registerMemberInTx(tx: Tx, profile: EngramProfile): Promis
   d.conversationId = profile.conversationId;
   d.trustLevel = profile.trustLevel;
   d.capabilities = profile.capabilities;
+  d.allowedTargets = profile.allowedTargets ?? [];
   d.description = profile.description;
   const idx = await tx.doc(EngramIndexDoc);
   if (!idx.ids.includes(profile.id)) idx.ids.push(profile.id);
@@ -249,6 +254,8 @@ export type CreateMemberSpec = {
   tools?: readonly ToolRegistration[];
   capabilities?: string[];
   trustLevel?: "trusted" | "untrusted";
+  /** Member/channel ids this member may route to (peer allowlist). */
+  allowedTargets?: string[];
   instructions?: string;
 };
 
@@ -276,6 +283,7 @@ export async function createMemberInTx(tx: Tx, spec: CreateMemberSpec): Promise<
     conversationId: rec.id,
     trustLevel: spec.trustLevel ?? "trusted",
     capabilities: spec.capabilities ?? [],
+    allowedTargets: spec.allowedTargets ?? [],
     description: "",
   });
   const ident = await tx.doc(MemberIdDoc, rec.id);
@@ -323,6 +331,30 @@ export async function resolveRouteInTx(tx: Tx, target: string): Promise<{ conver
   const c = await tx.doc(ChannelDoc, target, {});
   if (c.id !== "") return { conversationId: c.conversationId, kind: "channel" };
   return null;
+}
+
+// ---- Peer trust tier + untrusted peer input (Phase A2) ----------------------
+
+/** May a caller (member id, or null for the human/root) route to a target? Coordinator + human bypass; members need the target on their allowlist. */
+export async function canRouteInTx(tx: Tx, senderId: string | null, target: string): Promise<boolean> {
+  if (senderId === null) return true; // human / root — full authority
+  const p = await tx.doc(EngramDoc, senderId, {});
+  if (p.id === "") return false; // unknown member id → deny
+  if (p.kind === "coordinator") return true; // coordinator routes anywhere
+  return p.allowedTargets.includes(target); // member: allowlist only
+}
+
+/** May a caller post new work? Only the human/root or the coordinator — members don't self-initiate. */
+export async function canPostJobInTx(tx: Tx, senderId: string | null): Promise<boolean> {
+  if (senderId === null) return true; // human / root
+  const p = await tx.doc(EngramDoc, senderId, {});
+  if (p.id === "") return false;
+  return p.kind === "coordinator";
+}
+
+/** Render a peer-routed message body as delimited UNTRUSTED data (never instructions). */
+export function renderPeerMessageUntrusted(senderLabel: string, content: string): string {
+  return `<untrusted from="${senderLabel}">\n${content}\n</untrusted>`;
 }
 
 /** Create a shared channel (ownerless conversation) + board.channel doc. Returns the conversation id. */
@@ -435,6 +467,7 @@ const registerTool = defineTool({
     conversationId: Type.Number({ description: "The pi-durable conversation that is this member." }),
     trustLevel: Type.Union([Type.Literal("trusted"), Type.Literal("untrusted")]),
     capabilities: Type.Array(Type.String()),
+    allowedTargets: Type.Optional(Type.Array(Type.String())),
   }),
   replay: "unsafe",
   execute: async (args, api, ctx) => {
@@ -447,6 +480,7 @@ const registerTool = defineTool({
           conversationId: args.conversationId,
           trustLevel: args.trustLevel,
           capabilities: args.capabilities,
+          allowedTargets: args.allowedTargets ?? [],
           description: "",
         }),
       ctx,
@@ -468,6 +502,10 @@ const postJobTool = defineTool({
   }),
   replay: "unsafe",
   execute: async (args, api, ctx) => {
+    // Peer trust tier (A2): only the human/root or the coordinator may post new work — members don't self-initiate.
+    const senderId = await memberIdentityOf(api, api.conversationId, ctx); // null → human/root
+    const allowed = await api.commit((tx) => canPostJobInTx(tx, senderId), ctx);
+    if (!allowed) return { output: [{ type: "text" as const, text: "only the coordinator or the human may post jobs (members do not self-initiate work)" }] };
     await api.commit(
       async (tx) =>
         postJobInTx(tx, {
@@ -540,6 +578,7 @@ const createMemberTool = defineTool({
   parameters: Type.Object({
     name: Type.String({ description: "Unique member name/id." }),
     capabilities: Type.Optional(Type.Array(Type.String())),
+    allowedTargets: Type.Optional(Type.Array(Type.String())),
     instructions: Type.Optional(Type.String()),
   }),
   replay: "unsafe",
@@ -551,7 +590,7 @@ const createMemberTool = defineTool({
     const wanted = new Set(["claim_job", "report_status", "board_status", "recall", "remember", "read", "write", "edit", "bash"]);
     const tools = api.registry.tools().map((t) => t.tool).filter((t) => wanted.has(t.name));
     const conversationId = await api.commit(
-      (tx) => createMemberInTx(tx, { name: args.name, model, tools, capabilities: args.capabilities ?? [], instructions: args.instructions }),
+      (tx) => createMemberInTx(tx, { name: args.name, model, tools, capabilities: args.capabilities ?? [], allowedTargets: args.allowedTargets ?? [], instructions: args.instructions }),
       ctx,
     );
     return { output: [{ type: "text" as const, text: `created member "${args.name}" (conversation ${conversationId})` }] };
@@ -568,12 +607,17 @@ const routeMessageTool = defineTool({
   }),
   replay: "unsafe", // delivery is a side effect; exactly-once via the stable requestId below
   execute: async (args, api, ctx) => {
+    const senderId = await memberIdentityOf(api, api.conversationId, ctx); // null → human/root
+    // Peer trust tier (A2): the caller must be allowed to route to this target.
+    const allowed = await api.commit((tx) => canRouteInTx(tx, senderId, args.to), ctx);
+    if (!allowed) return { output: [{ type: "text" as const, text: `not authorized to route to "${args.to}"` }] };
     const route = await api.commit((tx) => resolveRouteInTx(tx, args.to), ctx);
     if (!route) return { output: [{ type: "text" as const, text: `unknown target "${args.to}"` }] };
-    const senderId = (await memberIdentityOf(api, api.conversationId, ctx)) ?? "coordinator";
+    const senderLabel = senderId ?? "human";
     // Exactly-once: a stable requestId from sender+target+content so a crash-retry reuses it and doesn't duplicate.
-    const requestId = `msg-${simpleHash(`${senderId}|${args.to}|${args.content}`)}`;
-    const text = `[${senderId} -> ${route.kind}:${args.to}] ${args.content}`;
+    const requestId = `msg-${simpleHash(`${senderLabel}|${args.to}|${args.content}`)}`;
+    // Untrusted peer input (A2): the body is delivered as delimited data, never instructions.
+    const text = `[${senderLabel} -> ${route.kind}:${args.to}] ${renderPeerMessageUntrusted(senderLabel, args.content)}`;
     const target = await api.conversation(route.conversationId as ConversationId, ctx);
     if (!target) return { output: [{ type: "text" as const, text: `target "${args.to}" has no conversation` }] };
     await target.submit({ type: "input", content: text, requestId }, ctx);
