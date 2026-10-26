@@ -32,6 +32,7 @@ import {
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
+import { ConversationMeta } from "../meta.ts";
 
 // ---- Board doc definitions (session-scoped) ----------------------------------
 
@@ -46,6 +47,8 @@ export type EngramProfile = {
   capabilities: string[];
   /** Member/channel ids this member may route to (peer allowlist). Coordinator + human bypass. */
   allowedTargets: string[];
+  /** Containment (A3): a disabled member is frozen from the board — it cannot claim, route, post, or record memory. Set only by the coordinator/human; durable across restart. */
+  status: "active" | "disabled";
   description: string;
 };
 
@@ -68,7 +71,7 @@ const EngramDoc = defineDocFamily<EngramProfile, JsonValue>({
   scope: "session",
   kind: "board.engram",
   version: 1,
-  initial: () => ({ id: "", name: "", kind: "member", conversationId: 0, trustLevel: "untrusted", capabilities: [], allowedTargets: [], description: "" }),
+  initial: () => ({ id: "", name: "", kind: "member", conversationId: 0, trustLevel: "untrusted", capabilities: [], allowedTargets: [], status: "active", description: "" }),
 });
 
 const JobDoc = defineDocFamily<Job, JsonValue>({
@@ -186,6 +189,7 @@ export async function registerMemberInTx(tx: Tx, profile: EngramProfile): Promis
   d.trustLevel = profile.trustLevel;
   d.capabilities = profile.capabilities;
   d.allowedTargets = profile.allowedTargets ?? [];
+  d.status = profile.status ?? "active";
   d.description = profile.description;
   const idx = await tx.doc(EngramIndexDoc);
   if (!idx.ids.includes(profile.id)) idx.ids.push(profile.id);
@@ -224,6 +228,7 @@ export async function readBoardStatusInTx(tx: Tx): Promise<BoardStatus> {
 export async function claimJobInTx(tx: Tx, jobId: string, meId: string): Promise<Job | null> {
   const d = await tx.doc(JobDoc, jobId, {});
   if (d.status !== "open") return null; // already claimed / unknown → single-winner guard
+  if (await isDisabledInTx(tx, meId)) return null; // A3: a disabled member cannot claim
   d.assignee = meId;
   d.status = "claimed";
   d.claimedBy = meId;
@@ -256,6 +261,8 @@ export type CreateMemberSpec = {
   trustLevel?: "trusted" | "untrusted";
   /** Member/channel ids this member may route to (peer allowlist). */
   allowedTargets?: string[];
+  /** Containment (A3): route this member's code execution into the per-member Podman sandbox (no host env, egress-limited, path-guarded). Default false. */
+  sandbox?: boolean;
   instructions?: string;
 };
 
@@ -284,8 +291,14 @@ export async function createMemberInTx(tx: Tx, spec: CreateMemberSpec): Promise<
     trustLevel: spec.trustLevel ?? "trusted",
     capabilities: spec.capabilities ?? [],
     allowedTargets: spec.allowedTargets ?? [],
+    status: "active",
     description: "",
   });
+  // Containment (A3): opt the member into the per-member Podman sandbox (no host env, egress-limited, path-guarded).
+  if (spec.sandbox) {
+    const meta = await tx.doc(ConversationMeta, rec.id);
+    meta.sandbox = true;
+  }
   const ident = await tx.doc(MemberIdDoc, rec.id);
   ident.memberId = spec.name;
   return rec.id;
@@ -297,11 +310,13 @@ export async function memberIdentityOf(reader: DocumentReader, conversationId: C
   return d && d.memberId ? d.memberId : null;
 }
 
-/** Append a durable note to a member's domain memory (atomic). Append-only log. */
-export async function rememberInTx(tx: Tx, memberId: string, note: string): Promise<void> {
+/** Append a durable note to a member's domain memory (atomic). Append-only log. Returns false if the member is disabled. */
+export async function rememberInTx(tx: Tx, memberId: string, note: string): Promise<boolean> {
+  if (await isDisabledInTx(tx, memberId)) return false; // A3: a disabled member cannot record memory
   const d = await tx.doc(MemberMemoryDoc, memberId, {});
   if (d.id === "") d.id = memberId;
   d.entries.push({ note, at: Date.now() });
+  return true;
 }
 
 /** Read a member's domain memory (empty entries if none recorded). */
@@ -337,9 +352,13 @@ export async function resolveRouteInTx(tx: Tx, target: string): Promise<{ conver
 
 /** May a caller (member id, or null for the human/root) route to a target? Coordinator + human bypass; members need the target on their allowlist. */
 export async function canRouteInTx(tx: Tx, senderId: string | null, target: string): Promise<boolean> {
-  if (senderId === null) return true; // human / root — full authority
+  // A3: a disabled member is frozen — it cannot be routed to, regardless of sender.
+  const t = await tx.doc(EngramDoc, target, {});
+  if (t.id !== "" && t.status === "disabled") return false;
+  if (senderId === null) return true; // human / root — full authority (to active targets)
   const p = await tx.doc(EngramDoc, senderId, {});
   if (p.id === "") return false; // unknown member id → deny
+  if (p.status === "disabled") return false; // A3: a disabled member cannot route (send)
   if (p.kind === "coordinator") return true; // coordinator routes anywhere
   return p.allowedTargets.includes(target); // member: allowlist only
 }
@@ -349,12 +368,36 @@ export async function canPostJobInTx(tx: Tx, senderId: string | null): Promise<b
   if (senderId === null) return true; // human / root
   const p = await tx.doc(EngramDoc, senderId, {});
   if (p.id === "") return false;
+  if (p.status === "disabled") return false; // A3: a disabled member cannot post
   return p.kind === "coordinator";
 }
 
 /** Render a peer-routed message body as delimited UNTRUSTED data (never instructions). */
 export function renderPeerMessageUntrusted(senderLabel: string, content: string): string {
   return `<untrusted from="${senderLabel}">\n${content}\n</untrusted>`;
+}
+
+// ---- Containment of a bad member (Phase A3) ---------------------------------
+
+/** Is this member currently disabled? */
+export async function isDisabledInTx(tx: Tx, memberId: string): Promise<boolean> {
+  const p = await tx.doc(EngramDoc, memberId, {});
+  return p.id !== "" && p.status === "disabled";
+}
+
+/** Durable central revoke/restore: set a member's status. Returns false if the member is unknown. */
+export async function setMemberStatusInTx(tx: Tx, memberId: string, status: "active" | "disabled"): Promise<boolean> {
+  const p = await tx.doc(EngramDoc, memberId, {});
+  if (p.id === "") return false;
+  p.status = status;
+  return true;
+}
+
+/** May a caller govern members (disable/enable)? Only the human/root or an active coordinator. */
+export async function canGovernInTx(tx: Tx, senderId: string | null): Promise<boolean> {
+  if (senderId === null) return true; // human / root
+  const p = await tx.doc(EngramDoc, senderId, {});
+  return p.id !== "" && p.kind === "coordinator" && p.status === "active";
 }
 
 /** Create a shared channel (ownerless conversation) + board.channel doc. Returns the conversation id. */
@@ -481,6 +524,7 @@ const registerTool = defineTool({
           trustLevel: args.trustLevel,
           capabilities: args.capabilities,
           allowedTargets: args.allowedTargets ?? [],
+          status: "active",
           description: "",
         }),
       ctx,
@@ -549,6 +593,7 @@ const claimJobTool = defineTool({
   execute: async (args, api, ctx) => {
     const me = await memberIdentityOf(api, api.conversationId, ctx);
     if (!me) return { output: [{ type: "text" as const, text: "not a registered member — cannot claim" }] };
+    if (await api.commit((tx) => isDisabledInTx(tx, me), ctx)) return { output: [{ type: "text" as const, text: "you are disabled — cannot claim" }] };
     const job = await api.commit((tx) => claimJobInTx(tx, args.jobId, me), ctx);
     const text = job ? `claimed ${job.id}: ${job.title}` : "not open (already claimed or unknown)";
     return { output: [{ type: "text" as const, text }] };
@@ -579,6 +624,7 @@ const createMemberTool = defineTool({
     name: Type.String({ description: "Unique member name/id." }),
     capabilities: Type.Optional(Type.Array(Type.String())),
     allowedTargets: Type.Optional(Type.Array(Type.String())),
+    sandbox: Type.Optional(Type.Boolean({ description: "Route this member's code execution into the per-member Podman sandbox (containment)." })),
     instructions: Type.Optional(Type.String()),
   }),
   replay: "unsafe",
@@ -590,7 +636,7 @@ const createMemberTool = defineTool({
     const wanted = new Set(["claim_job", "report_status", "board_status", "recall", "remember", "read", "write", "edit", "bash"]);
     const tools = api.registry.tools().map((t) => t.tool).filter((t) => wanted.has(t.name));
     const conversationId = await api.commit(
-      (tx) => createMemberInTx(tx, { name: args.name, model, tools, capabilities: args.capabilities ?? [], allowedTargets: args.allowedTargets ?? [], instructions: args.instructions }),
+      (tx) => createMemberInTx(tx, { name: args.name, model, tools, capabilities: args.capabilities ?? [], allowedTargets: args.allowedTargets ?? [], sandbox: args.sandbox ?? false, instructions: args.instructions }),
       ctx,
     );
     return { output: [{ type: "text" as const, text: `created member "${args.name}" (conversation ${conversationId})` }] };
@@ -706,12 +752,45 @@ const rememberTool = defineTool({
   execute: async (args, api, ctx) => {
     const me = await memberIdentityOf(api, api.conversationId, ctx);
     if (!me) return { output: [{ type: "text" as const, text: "not a registered member; cannot record memory" }] };
+    if (await api.commit((tx) => isDisabledInTx(tx, me), ctx)) return { output: [{ type: "text" as const, text: "you are disabled — cannot record memory" }] };
     await api.commit((tx) => rememberInTx(tx, me, args.note), ctx);
     return { output: [{ type: "text" as const, text: `remembered: ${args.note}` }] };
   },
 });
 
-/** The board extension: installs the Phase 0a + 0b + 0c tools plus Collective A1 (domain memory). */
+const disableMemberTool = defineTool({
+  name: "disable_member",
+  description:
+    "Durable central revoke: disable a board member so it can no longer claim, route, post, or record memory. Coordinator or human only. Persists across restart.",
+  parameters: Type.Object({ id: Type.String({ description: "Member id to disable." }) }),
+  replay: "unsafe",
+  execute: async (args, api, ctx) => {
+    const senderId = await memberIdentityOf(api, api.conversationId, ctx); // null → human/root
+    const done = await api.commit(async (tx) => {
+      if (!(await canGovernInTx(tx, senderId))) return false;
+      return setMemberStatusInTx(tx, args.id, "disabled");
+    }, ctx);
+    return { output: [{ type: "text" as const, text: done ? `member "${args.id}" disabled` : `cannot disable "${args.id}" (unknown member or not authorized)` }] };
+  },
+});
+
+const enableMemberTool = defineTool({
+  name: "enable_member",
+  description:
+    "Restore a disabled board member so it can claim, route, post, and record memory again. Coordinator or human only.",
+  parameters: Type.Object({ id: Type.String({ description: "Member id to re-enable." }) }),
+  replay: "unsafe",
+  execute: async (args, api, ctx) => {
+    const senderId = await memberIdentityOf(api, api.conversationId, ctx); // null → human/root
+    const done = await api.commit(async (tx) => {
+      if (!(await canGovernInTx(tx, senderId))) return false;
+      return setMemberStatusInTx(tx, args.id, "active");
+    }, ctx);
+    return { output: [{ type: "text" as const, text: done ? `member "${args.id}" re-enabled` : `cannot enable "${args.id}" (unknown member or not authorized)` }] };
+  },
+});
+
+/** The board extension: installs the Phase 0a + 0b + 0c tools plus Collective A1 (domain memory) and A3 (containment). */
 export function boardExtension() {
   return defineExtension({
     name: "board",
@@ -728,6 +807,8 @@ export function boardExtension() {
       readKnowledgeTool,
       recallTool,
       rememberTool,
+      disableMemberTool,
+      enableMemberTool,
     ],
   });
 }

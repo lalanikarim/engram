@@ -624,12 +624,34 @@ delimited UNTRUSTED data so an embedded instruction does not make a receiver act
 Verification: `tsc --noEmit` clean; board test **40/40**; board-trust-live **4/4** on Qwen3.8-27B;
 board-comms-live **3/3** and board-memory-live **6/6** still pass.
 
+### Collective — phase A3 ✅ COMPLETE (2026-10-25, `feature/collective-a3`)
+
+Containment of a bad member. Two complementary guarantees: a durable central revoke/disable that freezes
+a member from the board, and per-member Podman sandboxing (reusing the D12–13 sidecar) so a member's code
+can't read shared secrets or escape its workspace.
+
+- `extensions/board.ts`: `EngramProfile.status: "active" | "disabled"` (doc default "active"). New helpers
+  `isDisabledInTx`, `setMemberStatusInTx`, `canGovernInTx`. Gates enforce the freeze: `canRouteInTx` (a disabled
+  member can't send **and** can't be routed to), `canPostJobInTx`, `claimJobInTx`, and `rememberInTx` (now returns
+  bool). New tools `disable_member` / `enable_member` (coordinator/human only).
+- Sandbox wiring: `createMemberInTx` accepts `sandbox?: boolean` and sets `ConversationMeta.sandbox` so the
+  member's code execution routes into the per-member Podman sidecar (`create_member` exposes it). Default false
+  to preserve M1 behavior + non-Podman testability; production members should be created sandboxed.
+- `test/board.test.ts`: +17 checks (governance, central revoke, freeze of claim/route/post/remember, can't
+  route-to-disabled, re-enable, sandbox-flag wiring, disabled-status surviving restart) → **57/57**.
+- `test/sandbox-containment.test.ts` (new): directly exercises PodmanSandboxEnv — no host env vars leak into the
+  container (a member can't read shared secrets) and file writes outside the workspace are denied. Podman-gated;
+  skips cleanly without it.
+
+Verification: `tsc --noEmit` clean; board test **57/57**; sandbox-containment **5/5** on Podman;
+board-comms-live **3/3** and board-trust-live **4/4** still pass (no routing regression).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
-phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phases A1 (domain memory) +
-A2 (peer trust tier + untrusted peer input) complete; phases A3–A4 next (containment of a bad member,
-standing team + coordinator triage). Option B (Society) research continues on `feature/society-research`.
+phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phases A1 (domain memory),
+A2 (peer trust tier + untrusted peer input), and A3 (containment of a bad member) complete; phase A4 next
+(standing team + coordinator triage). Option B (Society) research continues on `feature/society-research`.
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

@@ -101,6 +101,7 @@ async function main() {
         trustLevel: "trusted",
         capabilities: ["coordinate"],
         allowedTargets: [],
+        status: "active",
         description: "The standing coordinator brain.",
       });
       return undefined;
