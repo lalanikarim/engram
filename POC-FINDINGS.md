@@ -559,11 +559,33 @@ Verification: `tsc --noEmit` clean; board test 20/20; board-comms-live 3/3 on Qw
 (member run ~3s). Client surfaces (Web UI / Telegram dashboards) + approval routing are phase 0d
 (next).
 
+### Board P0 — phase 0d ✅ COMPLETE (2026-10-25, `feature/board-0d`)
+
+Client surfaces + approval routing. The board is now visible to the human on both clients, and a
+member's gated action routes to the human durably. **Project 0 (the board) is complete.**
+
+- `server.ts`: `GET /board` — read-only dashboard (members, open jobs, channels, knowledge +
+  pending approvals). Read via snapshots, not a commit: a doc-reading commit stalls on finalization
+  in the HTTP handler while the SSE watcher is live (a trivial commit resolves; a doc-reading one
+  does not) — snapshots resolve cleanly there.
+- `web/app.js` + `web/index.html`: a Board panel in the sidebar (polls `/board`, lists members +
+  open jobs). The existing approvals banner already surfaces member approvals for action.
+- `telegram.ts`: `/board` command (dashboard summary); pending approvals from unbound conversations
+  (e.g. board members) now route to the human's root chat so they're actionable on Telegram too.
+- `extensions/board.ts`: `readBoardDashboard(reader, ctx)` (snapshot-based) + `listChannelsInTx`.
+- `test/board.test.ts`: extended to dashboard assembly — 25 checks.
+- `test/board-approval-live.test.ts`: live proof that a member's gated action is blocked, discovered
+  across all conversations (what GET /approvals + GET /board use), approved durably, and executes on
+  retry. Skips cleanly without a local endpoint.
+
+Verification: `tsc --noEmit` clean; board test 25/25; board-approval-live 4/4 on Qwen3.8-27B; live
+smoke `GET /board` → 200 with the full dashboard. **Phases 0a–0d all complete — Project 0 done.**
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
-phases 0a–0c complete, phase 0d next (client surfaces + approval routing). Option A (Collective) and Option B (Society) research
+phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective) and Option B (Society) research
 continue on separate branches (`feature/society-research`).
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

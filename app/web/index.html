@@ -64,6 +64,14 @@
   .approval .a-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
   .approval .a-key { color: var(--dim); font-size: 11px; }
 
+  /* board panel */
+  .board-section { border-top: 1px solid var(--border); }
+  .board-list { padding: 6px; max-height: 38vh; overflow-y: auto; }
+  .board-group { font-size: 10px; color: var(--dim); margin: 6px 4px 2px; text-transform: uppercase; letter-spacing: .04em; }
+  .board-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-size: 12px; padding: 3px 6px; border-radius: 5px; overflow: hidden; }
+  .board-row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board-row.dim { color: var(--dim); }
+
   /* composer */
   .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--panel); }
   .composer input { flex: 1; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; }

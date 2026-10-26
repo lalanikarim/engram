@@ -40,6 +40,7 @@ import {
   type ApprovalRule,
 } from "./extensions/approvals.ts";
 import { ConversationMeta } from "./meta.ts";
+import { readBoardDashboard } from "./extensions/board.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const MAX_BODY_BYTES = 1_000_000;
@@ -560,6 +561,14 @@ export function createServer(deps: ServerDeps): http.Server {
           return;
         }
         sendJson(res, 201, { id: forked, forkedFrom: parentId, fresh: false });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/board") {
+        // Read-only board dashboard: members, open jobs, channels, knowledge + pending approvals.
+        const dashboard = await readBoardDashboard(harness, ctx);
+        const approvals = await pendingApprovals(harness);
+        sendJson(res, 200, { ...dashboard, pendingApprovals: approvals });
         return;
       }
 
