@@ -537,11 +537,33 @@ Claim + member work loop. Members now act under **self-identity** (req 5): a con
 Verification: `tsc --noEmit` clean; board test 12/12; board-live 6/6 on Qwen3.8-27B (member run
 ~4s). Routing/comms and knowledge exchange are phases 0c–0d (next).
 
+### Board P0 — phase 0c ✅ COMPLETE (2026-10-25, `feature/board-0c`)
+
+Comms bus + knowledge exchange. Members can now route messages to other members or shared
+channels, and publish/read knowledge posts with provenance + trust tier rendered as untrusted data.
+
+- `extensions/board.ts`: `route_message` (the send_message seam — resolves a member/channel from
+  the board directory and delivers exactly-once via a stable requestId), `create_channel`,
+  `publish_knowledge`, `read_knowledge`; `board.channel` + `board.knowledge` doc families with
+  index singletons; helpers `resolveRouteInTx`/`createChannelInTx`/`publishKnowledgeInTx`/
+  `readKnowledgeInTx`/`listKnowledgeInTx`/`renderKnowledgeUntrusted`.
+- Knowledge posts carry provenance (author + source) and a trust tier; `read_knowledge` renders
+  the body in `<untrusted ...>` delimiters so peer/web content is data, never instructions.
+- `test/board.test.ts`: extended to channel creation, route resolution (member/channel/unknown),
+  knowledge provenance + untrusted rendering, and durability across restart — 20 checks.
+- `test/board-comms-live.test.ts`: live routing — a member calls route_message and the message
+  durably appears in the target channel's transcript with sender attribution. Skips cleanly
+  without a local endpoint.
+
+Verification: `tsc --noEmit` clean; board test 20/20; board-comms-live 3/3 on Qwen3.8-27B
+(member run ~3s). Client surfaces (Web UI / Telegram dashboards) + approval routing are phase 0d
+(next).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
-phases 0a–0b complete, phases 0c–0d next (routing/comms, knowledge, client surfaces + approval routing). Option A (Collective) and Option B (Society) research
+phases 0a–0c complete, phase 0d next (client surfaces + approval routing). Option A (Collective) and Option B (Society) research
 continue on separate branches (`feature/society-research`).
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

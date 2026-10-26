@@ -15,12 +15,17 @@ import { buildCatalog } from "../src/model.ts";
 import {
   boardExtension,
   claimJobInTx,
+  createChannelInTx,
   createMemberInTx,
   memberIdentityOf,
   postJobInTx,
+  publishKnowledgeInTx,
   readBoardStatusInTx,
   readJobInTx,
+  readKnowledgeInTx,
+  renderKnowledgeUntrusted,
   reportStatusInTx,
+  resolveRouteInTx,
 } from "../src/extensions/board.ts";
 
 let passed = 0;
@@ -107,6 +112,26 @@ async function main() {
   const done = await h.commit((tx) => reportStatusInTx(tx, "job-1", "done", "result-x"), ctx);
   check("job marked done with result", done.status === "done" && done.result === "result-x" && done.assignee === "alpha");
 
+  console.log("channels + routing resolution (Phase 0c)");
+  const chanConv = await h.commit((tx) => createChannelInTx(tx, { id: "general", name: "General", purpose: "team chatter" }), ctx);
+  check("channel created with its own conversation", chanConv !== undefined && chanConv !== alphaConv && chanConv !== betaConv);
+  const rMember = await h.commit((tx) => resolveRouteInTx(tx, "alpha"), ctx);
+  check("route resolves a member target", rMember !== null && rMember.kind === "member" && rMember.conversationId === alphaConv);
+  const rChannel = await h.commit((tx) => resolveRouteInTx(tx, "general"), ctx);
+  check("route resolves a channel target", rChannel !== null && rChannel.kind === "channel" && rChannel.conversationId === chanConv);
+  check("unknown route target resolves to null", (await h.commit((tx) => resolveRouteInTx(tx, "nope"), ctx)) === null);
+
+  console.log("knowledge + untrusted rendering (Phase 0c)");
+  await h.commit(
+    (tx) =>
+      publishKnowledgeInTx(tx, { id: "k1", title: "Notes", body: "peer said X", authorType: "engram", authorId: "alpha", source: "web", trustTier: "untrusted", createdAt: Date.now() }),
+    ctx,
+  );
+  const k = await h.commit((tx) => readKnowledgeInTx(tx, "k1"), ctx);
+  check("knowledge stored with provenance + trust tier", k !== null && k.source === "web" && k.trustTier === "untrusted" && k.authorId === "alpha");
+  const rendered = k ? renderKnowledgeUntrusted(k) : "";
+  check("knowledge body rendered as delimited untrusted data", rendered.includes("<untrusted") && rendered.includes("peer said X") && rendered.includes("</untrusted>"));
+
   console.log("durability across restart");
   await h.close(ctx);
   const h2 = await openHarness(dbPath); // same file → resume existing state
@@ -115,6 +140,8 @@ async function main() {
   const doneJob = await h2.commit(async (tx) => readJobInTx(tx, "job-1"), ctx);
   check("done job survives restart", doneJob !== null && doneJob.status === "done" && doneJob.result === "result-x");
   check("member self-identity survives restart", (await memberIdentityOf(h2, alphaConv, ctx)) === "alpha");
+  check("channel route survives restart", (await h2.commit((tx) => resolveRouteInTx(tx, "general"), ctx))?.kind === "channel");
+  check("knowledge post survives restart", (await h2.commit((tx) => readKnowledgeInTx(tx, "k1"), ctx))?.source === "web");
   await h2.close(ctx);
 
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
