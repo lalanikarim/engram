@@ -581,11 +581,33 @@ member's gated action routes to the human durably. **Project 0 (the board) is co
 Verification: `tsc --noEmit` clean; board test 25/25; board-approval-live 4/4 on Qwen3.8-27B; live
 smoke `GET /board` → 200 with the full dashboard. **Phases 0a–0d all complete — Project 0 done.**
 
+### Collective — phase A1 ✅ COMPLETE (2026-10-25, `feature/collective-a1`)
+
+Member domain memory — the headline value of a collective vs. fan-out. Each member now has durable,
+domain-scoped knowledge that survives transcript compaction and persists across sessions, so it gets
+smarter on its beat instead of starting cold each session. Builds directly on the P0 board (no rework).
+
+- `extensions/board.ts`: new `board.memberMemory` doc family (session-scoped, keyed by member id — an
+  append-only log of `{note, at}` entries; no index doc needed since it's addressed directly, not
+  enumerated). Helpers `rememberInTx` / `recallInTx` / `renderMemberMemory`. Thin tools `recall`
+  (read-only) + `remember` (writes the member's memory), both resolving "me" from self-identity.
+  Default member instructions now direct recall() at task start and remember(\<note\>) as the member
+  learns; recall/remember are added to the member tool set.
+- Design note: memory is a durable doc, not a workspace file — atomic with the transcript, trivially
+  testable, consistent with every other board primitive. `recallInTx` deep-copies entries to plain data:
+  a spread of the doc proxy left a live nested array that threw "settled overlay" when read after commit.
+
+Verification: `tsc --noEmit` clean; `board.test.ts` **31/31** (adds domain-memory persistence + restart);
+`board-memory-live.test.ts` **6/6** on Qwen3.8-27B — a member records two durable facts with remember() in
+one session, then consults recall() and answers from them in a later session without being re-told; the
+memory doc durably holds both (read independently of the transcript). Skips cleanly without a local endpoint.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
 the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
-phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective) and Option B (Society) research
-continue on separate branches (`feature/society-research`).
+phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phase A1 (member domain
+memory) complete; phases A2–A4 next (peer trust tier + untrusted peer input, containment of a bad member,
+standing team + coordinator triage). Option B (Society) research continues on `feature/society-research`.
 Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

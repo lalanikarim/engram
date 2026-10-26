@@ -11,7 +11,8 @@
 // report_status, standing named members (per-member workspace), and member
 // self-identity. Phase 0c adds the comms bus (route_message + channels as
 // conversations) and knowledge exchange (publish_knowledge with provenance +
-// trust tier, rendered as untrusted data).
+// trust tier, rendered as untrusted data). Collective phase A1 adds per-member
+// domain memory (board.memberMemory + recall/remember tools) that survives compaction.
 import { createHash } from "node:crypto";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
@@ -148,6 +149,27 @@ const KnowledgeIndexDoc = defineDoc<{ ids: string[] }>({
   initial: () => ({ ids: [] }),
 });
 
+// ---- Member domain memory (Phase A1) ---------------------------------------
+
+/**
+ * A member's durable domain memory: an append-only log of notes that survives transcript
+ * compaction and persists across sessions. Keyed by member id (no index doc needed — it's
+ * addressed directly, not enumerated). This is what makes a collective a "collective": a member
+ * gets smarter on its beat over time rather than starting cold each session.
+ */
+export type MemberMemory = {
+  id: string; // the member id (doc key)
+  entries: { note: string; at: number }[]; // append-only, oldest → newest
+};
+
+const MemberMemoryDoc = defineDocFamily<MemberMemory, JsonValue>({
+  family: true,
+  scope: "session",
+  kind: "board.memberMemory",
+  version: 1,
+  initial: () => ({ id: "", entries: [] }),
+});
+
 // ---- Commit-level helpers (the core logic; testable without a model) --------
 
 /** Register (or update) a member and index it. Idempotent on id. */
@@ -242,7 +264,7 @@ export async function createMemberInTx(tx: Tx, spec: CreateMemberSpec): Promise<
     cwd: spec.name, // harness env maps this to workRoot/<name> (per-member workspace)
     instructions:
       spec.instructions ??
-      `You are "${spec.name}", a standing member on the shared board. Claim open jobs that fit you, do the work in your own workspace, and report the result with report_status.`,
+      `You are "${spec.name}", a standing member on the shared board. Claim open jobs that fit you, do the work in your own workspace, and report the result with report_status. You have persistent domain memory: at the start of each task, call recall() to load it, and as you learn durable facts about your domain (conventions, runbooks, decisions, preferences, past failures), record them with remember(<note>) so they persist across sessions.`,
     ...(spec.tools ? { tools: spec.tools } : {}),
   };
   const rec = await tx.createConversation({ ownership: { kind: "ownerless" } });
@@ -265,6 +287,28 @@ export async function createMemberInTx(tx: Tx, spec: CreateMemberSpec): Promise<
 export async function memberIdentityOf(reader: DocumentReader, conversationId: ConversationId, ctx: Context): Promise<string | null> {
   const d = await reader.snapshot(MemberIdDoc, conversationId, ctx);
   return d && d.memberId ? d.memberId : null;
+}
+
+/** Append a durable note to a member's domain memory (atomic). Append-only log. */
+export async function rememberInTx(tx: Tx, memberId: string, note: string): Promise<void> {
+  const d = await tx.doc(MemberMemoryDoc, memberId, {});
+  if (d.id === "") d.id = memberId;
+  d.entries.push({ note, at: Date.now() });
+}
+
+/** Read a member's domain memory (empty entries if none recorded). */
+export async function recallInTx(tx: Tx, memberId: string): Promise<MemberMemory> {
+  const d = await tx.doc(MemberMemoryDoc, memberId, {});
+  if (d.id === "") return { id: memberId, entries: [] };
+  // Deep-copy entries to plain data so the returned value is detached from the doc proxy
+  // (accessing a nested entry after the commit settles would hit a settled overlay).
+  return { id: d.id, entries: d.entries.map((e) => ({ note: e.note, at: e.at })) };
+}
+
+/** Render a member's memory as numbered notes for context. */
+export function renderMemberMemory(mem: MemberMemory): string {
+  if (mem.entries.length === 0) return "(no domain memory recorded yet)";
+  return mem.entries.map((e, i) => `${i + 1}. ${e.note}`).join("\n");
 }
 
 /** A stable short hash for exactly-once request ids. */
@@ -504,7 +548,7 @@ const createMemberTool = defineTool({
     const model = agent.model;
     if (!model) return { output: [{ type: "text" as const, text: "no model available to give the member" }] };
     // Default member tool set: board member tools + file/shell (not coordinator-only register/post_job).
-    const wanted = new Set(["claim_job", "report_status", "board_status", "read", "write", "edit", "bash"]);
+    const wanted = new Set(["claim_job", "report_status", "board_status", "recall", "remember", "read", "write", "edit", "bash"]);
     const tools = api.registry.tools().map((t) => t.tool).filter((t) => wanted.has(t.name));
     const conversationId = await api.commit(
       (tx) => createMemberInTx(tx, { name: args.name, model, tools, capabilities: args.capabilities ?? [], instructions: args.instructions }),
@@ -595,7 +639,35 @@ const readKnowledgeTool = defineTool({
   },
 });
 
-/** The board extension: installs the Phase 0a + 0b + 0c tools. */
+const recallTool = defineTool({
+  name: "recall",
+  description:
+    "Load your own persistent domain memory (durable across sessions and compaction). Call this at the start of each task before acting.",
+  parameters: Type.Object({}),
+  replay: "safe", // read-only
+  execute: async (_args, api, ctx) => {
+    const me = await memberIdentityOf(api, api.conversationId, ctx);
+    if (!me) return { output: [{ type: "text" as const, text: "not a registered member; no domain memory" }] };
+    const mem = await api.commit((tx) => recallInTx(tx, me), ctx);
+    return { output: [{ type: "text" as const, text: renderMemberMemory(mem) }] };
+  },
+});
+
+const rememberTool = defineTool({
+  name: "remember",
+  description:
+    "Record a durable fact about your domain (convention, runbook, decision, preference, past failure) so it persists across sessions and survives compaction.",
+  parameters: Type.Object({ note: Type.String({ description: "The durable domain fact to remember." }) }),
+  replay: "unsafe", // writes the member's memory doc
+  execute: async (args, api, ctx) => {
+    const me = await memberIdentityOf(api, api.conversationId, ctx);
+    if (!me) return { output: [{ type: "text" as const, text: "not a registered member; cannot record memory" }] };
+    await api.commit((tx) => rememberInTx(tx, me, args.note), ctx);
+    return { output: [{ type: "text" as const, text: `remembered: ${args.note}` }] };
+  },
+});
+
+/** The board extension: installs the Phase 0a + 0b + 0c tools plus Collective A1 (domain memory). */
 export function boardExtension() {
   return defineExtension({
     name: "board",
@@ -610,6 +682,8 @@ export function boardExtension() {
       createChannelTool,
       publishKnowledgeTool,
       readKnowledgeTool,
+      recallTool,
+      rememberTool,
     ],
   });
 }

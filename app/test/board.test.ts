@@ -24,7 +24,10 @@ import {
   readBoardStatusInTx,
   readJobInTx,
   readKnowledgeInTx,
+  recallInTx,
+  rememberInTx,
   renderKnowledgeUntrusted,
+  renderMemberMemory,
   reportStatusInTx,
   resolveRouteInTx,
 } from "../src/extensions/board.ts";
@@ -145,6 +148,18 @@ async function main() {
   check("dashboard lists the channel", dash.channels.some((c) => c.id === "general"));
   check("dashboard lists the knowledge post", dash.knowledge.some((k2) => k2.id === "k1"));
 
+  console.log("member domain memory (Collective A1)");
+  const emptyMem = await h.commit((tx) => recallInTx(tx, "beta"), ctx);
+  check("fresh member has no domain memory yet", emptyMem.entries.length === 0 && renderMemberMemory(emptyMem).includes("no domain memory"));
+  await h.commit((tx) => rememberInTx(tx, "alpha", "deploy uses the blue-green runbook in ops/"), ctx);
+  await h.commit((tx) => rememberInTx(tx, "alpha", "prod DB is read-replicated; never write to the replica"), ctx);
+  const alphaMem = await h.commit((tx) => recallInTx(tx, "alpha"), ctx);
+  check("remember appends durable notes (append-only)", alphaMem.entries.length === 2 && alphaMem.entries[0].note.includes("blue-green"));
+  check("recall returns the member's recorded memory", alphaMem.entries.some((e) => e.note.includes("read-replicated")));
+  const memRendered = renderMemberMemory(alphaMem);
+  check("memory renders as numbered notes", memRendered.startsWith("1.") && memRendered.includes("2."));
+  check("beta's memory is independent of alpha's", (await h.commit((tx) => recallInTx(tx, "beta"), ctx)).entries.length === 0);
+
   console.log("durability across restart");
   await h.close(ctx);
   const h2 = await openHarness(dbPath); // same file → resume existing state
@@ -155,6 +170,8 @@ async function main() {
   check("member self-identity survives restart", (await memberIdentityOf(h2, alphaConv, ctx)) === "alpha");
   check("channel route survives restart", (await h2.commit((tx) => resolveRouteInTx(tx, "general"), ctx))?.kind === "channel");
   check("knowledge post survives restart", (await h2.commit((tx) => readKnowledgeInTx(tx, "k1"), ctx))?.source === "web");
+  const alphaMemAfter = await h2.commit((tx) => recallInTx(tx, "alpha"), ctx);
+  check("member domain memory survives restart", alphaMemAfter.entries.length === 2 && alphaMemAfter.entries.some((e) => e.note.includes("blue-green")));
   await h2.close(ctx);
 
   console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
