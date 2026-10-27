@@ -705,6 +705,21 @@ B6 if multi-human approval routing demands it). Delivered `docs/ecosystem-flows.
 HTML edition with inlined SVGs); `product-core-split.md` now points to it as the current flow
 reference. No code changes.
 
+### Route seam in the kernel (issue: ecosystem-flows §5.1) ✅ COMPLETE (2026-10-26, `feature/route-seam`)
+
+The kernel no longer knows about the board — apps register their own HTTP routes.
+
+- `app/src/server.ts`: new exported `AppRoute` / `RouteContext`; `ServerDeps.routes` is dispatched after the core routes, before the 404 (exact method + pathname match). `RouteContext` gives handlers `harness`, `config`, a durable background `ctx`, a `json()` helper, and `pendingApprovals()`. The `GET /board` handler and the `readBoardDashboard` import are **out of core**.
+- `app/src/core.ts`: `createCoreInstance({ routes })` passes them through; stability contract notes the route injection point as stable/additive.
+- `app/src/main.ts`: the product registers `GET /board` via the seam (dashboard + pending approvals, same payload as before).
+
+Test fixes found while getting the suite green:
+- `telegram.test.ts` hermeticity: it spawns `main.ts` with a fresh temp `PI_AGENT_DIR`, but local `app/.env` carries `DEFAULT_MODEL=spark:…` which only resolves via `~/.pi/agent/models.json` → boot crashed ("unknown provider spark"). The spawn env now sets `DEFAULT_MODEL: ""` (loadDotEnv never overwrites existing keys; empty falls back to endpoint discovery). Pre-existing on main — verified in a worktree.
+- `board-trust-live.test.ts` flake: the live relay model now sometimes **refuses** to forward the injection-pattern test content (correct security behavior), so the wrapper check failed ~3 of 5 runs. Delivery is now driven deterministically (replicating `route_message`'s mechanics via `renderPeerMessageUntrusted` + exactly-once submit); the live model still proves the receiver declines the embedded instruction. Two consecutive green runs after the change.
+- Note: `api.test.ts` steering check ("final answer contains SLOW-DONE") is flaky on **main too** (2 failures there, 1 on this branch) — pre-existing model drift at the local endpoint, not caused by this change.
+
+Verification: `tsc --noEmit` clean; `core-instance.test.ts` **15/15** (+4 route-seam checks: route served, exact method+path match, bare core 404s on `/board`, routes are per-instance); `telegram.test.ts` **28/28**; full `npm test` green except the pre-existing api steering flake.
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
@@ -713,5 +728,7 @@ phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective)
 A2 (peer trust tier + untrusted peer input), A3 (containment of a bad member), and A4 (standing team +
 coordinator triage, end-to-end) complete — the Collective MVP is DONE. Option B (Society) research continues
 on `feature/society-research`.
-Next planned work: smarter approvals phase 5 (classifier scoring) — deferred; phases 1–4 done.
+Next planned work (per `docs/ecosystem-flows.md` §5): reframe `app/` as the Collective app; M2 remote
+member transport when a project brain needs its own store; Society B1 governance extension. Smarter
+approvals phase 5 (classifier scoring) remains deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

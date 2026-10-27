@@ -147,6 +147,11 @@ const proc = spawn("node", [path.join(APP_ROOT, "src", "main.ts")], {
     CONFIG_DIR: dirs.config,
     GATED_TOOLS: "send_message",
     PI_AGENT_DIR: agentDir,
+    // The temp agent dir has no models.json, so a DEFAULT_MODEL from app/.env that
+    // references a custom provider (e.g. "spark") cannot resolve. Empty string keeps
+    // loadDotEnv from injecting it (it never overwrites existing keys) and makes the
+    // catalog fall back to the discovered model on OPENAI_BASE_URL.
+    DEFAULT_MODEL: "",
   },
   stdio: ["ignore", "pipe", "pipe"],
 });

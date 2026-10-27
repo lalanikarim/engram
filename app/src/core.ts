@@ -8,7 +8,7 @@
 //
 // Stability contract: this module is a public surface for consumers that pin
 // engram as a component (e.g. drydock). The instance lifecycle (open/resume/close)
-// and the extraExtensions injection point are stable; config fields are additive.
+// and the extraExtensions/route injection points are stable; options and config fields are additive.
 // Breaking changes require a major version bump with a deprecation window.
 //
 // Trust note: extraExtensions run with full core privilege — same trust tier as the
@@ -33,7 +33,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import type { AppConfig } from "./config.ts";
 import { defaultModelRef, loadModelsConfig, type ModelsConfig } from "./model.ts";
 import { buildRegistry } from "./registry.ts";
-import { createServer } from "./server.ts";
+import { createServer, type AppRoute } from "./server.ts";
 import { SandboxManager } from "./sandbox.ts";
 
 export interface CoreInstanceOptions {
@@ -50,6 +50,8 @@ export interface CoreInstanceOptions {
   rootAgent?: AgentChange;
   /** Runs inside the root-creation commit (e.g. product board registration). */
   rootInit?: (tx: Tx, conversationId: ConversationId) => Promise<void>;
+  /** App-registered HTTP routes (product/consumer endpoints), tried after core routes. */
+  routes?: readonly AppRoute[];
 }
 
 export interface CoreInstance {
@@ -130,7 +132,7 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
 
   const host = opts.host ?? config.host;
   const port = opts.port ?? config.port;
-  const server = createServer({ harness, root, config, modelsConfig });
+  const server = createServer({ harness, root, config, modelsConfig, routes: opts.routes });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => resolve());

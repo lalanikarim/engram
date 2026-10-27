@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { Context } from "@earendil-works/chord";
 import type { Conversation, ConversationId, EntryRecord, EntryId, Harness, ModelRef } from "@earendil-works/pi-durable";
 import { AgentDoc, watchEvents } from "@earendil-works/pi-durable";
 import type { AppConfig } from "./config.ts";
@@ -40,7 +41,6 @@ import {
   type ApprovalRule,
 } from "./extensions/approvals.ts";
 import { ConversationMeta } from "./meta.ts";
-import { readBoardDashboard } from "./extensions/board.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 const MAX_BODY_BYTES = 1_000_000;
@@ -82,6 +82,32 @@ export interface ServerDeps {
   config: AppConfig;
   /** Multi-provider catalog + global default (DEFAULT_MODEL / local fallback). */
   modelsConfig: ModelsConfig;
+  /** App-registered routes, tried after the core routes (product/consumer endpoints). */
+  routes?: readonly AppRoute[];
+}
+
+/** Context handed to app-registered routes (see {@link AppRoute}). */
+export interface RouteContext {
+  harness: Harness;
+  config: AppConfig;
+  /** Durable background context for commits/snapshots from the route handler. */
+  ctx: Context;
+  /** Send a JSON response (no-op if headers were already sent). */
+  json: (res: http.ServerResponse, status: number, body: unknown) => void;
+  /** Pending approval requests (same shape as GET /approvals). */
+  pendingApprovals: () => Promise<Record<string, unknown>[]>;
+}
+
+/**
+ * App-registered HTTP route — the product/consumer seam for custom endpoints.
+ * Matched by exact method + pathname and tried after the core routes, before the
+ * 404 fallback. The kernel knows nothing about what apps serve; this is how e.g.
+ * the product's GET /board or a consumer's webhook intake reach the instance server.
+ */
+export interface AppRoute {
+  method: string;
+  path: string;
+  handle: (req: http.IncomingMessage, res: http.ServerResponse, routeCtx: RouteContext) => Promise<void>;
 }
 
 /** Route-level error with an HTTP status (bad model refs → 400, overflow guard → 409). */
@@ -273,7 +299,16 @@ function entrySummary(e: EntryRecord) {
 }
 
 export function createServer(deps: ServerDeps): http.Server {
-  const { harness, root, config, modelsConfig } = deps;
+  const { harness, root, config, modelsConfig, routes } = deps;
+
+  // Context for app-registered routes (deps.routes); built once, shared per request.
+  const routeCtx: RouteContext = {
+    harness,
+    config,
+    ctx,
+    json: (res, status, body) => sendJson(res, status, body),
+    pendingApprovals: () => pendingApprovals(harness),
+  };
 
   // TTL sweeper: an initial pass after startup plus a periodic one. The period is bounded
   // so tiny test TTLs still sweep within seconds; production (24 h) sweeps every 5 min.
@@ -566,14 +601,6 @@ export function createServer(deps: ServerDeps): http.Server {
         return;
       }
 
-      if (req.method === "GET" && pathname === "/board") {
-        // Read-only board dashboard: members, open jobs, channels, knowledge + pending approvals.
-        const dashboard = await readBoardDashboard(harness, ctx);
-        const approvals = await pendingApprovals(harness);
-        sendJson(res, 200, { ...dashboard, pendingApprovals: approvals });
-        return;
-      }
-
       if (req.method === "GET" && pathname === "/approvals") {
         // Sweep first so the list never contains already-expired requests.
         await sweepExpiredApprovals(harness, config.approvalTtlHours * 3_600_000);
@@ -716,6 +743,14 @@ export function createServer(deps: ServerDeps): http.Server {
       if (req.method === "GET" && pathname === "/stream") {
         await handleStream(req, res, searchParams);
         return;
+      }
+
+      // App-registered routes (product/consumer endpoints) — after core routes, before 404.
+      for (const route of routes ?? []) {
+        if (route.method === req.method && route.path === pathname) {
+          await route.handle(req, res, routeCtx);
+          return;
+        }
       }
 
       sendJson(res, 404, { error: "not found" });

@@ -48,7 +48,7 @@ later." The board schema is identical in both tiers.
 | Per-brain isolation, model pooling, own KB/workspace | Free from `createCoreInstance` per instance |
 | Fleet supervisor (boot N instances with per-member config) | Small — the drydock supervisor pattern already exists |
 | **Remote member transport** (board-owner HTTP API + client side of post/claim/route/report) | **The one genuinely new mechanism** — exactly-once over HTTP, cross-process crash semantics, instance auth |
-| Route seam in core (apps register their own HTTP routes) | Small, general kernel addition — moves `/board` out of `server.ts`; drydock webhooks benefit too |
+| Route seam in core (apps register their own HTTP routes) | **Shipped** — `createCoreInstance({ routes })`; `/board` now registers from the product layer; drydock webhooks benefit too |
 
 ### Invariants that must survive every app
 
@@ -319,7 +319,7 @@ every bump.
 
 ### Open work this paradigm implies (in dependency order)
 
-1. **Route seam in kernel** — apps register their own HTTP routes; moves `/board` out of `server.ts`.
+1. ~~**Route seam in kernel**~~ — **done**: `createCoreInstance({ routes })` / `ServerDeps.routes`; `/board` now registers from the product layer (`main.ts`), the kernel is board-free.
 2. **Reframe `app/` as the Collective app** — it already is one (`main.ts` = supervisor + board + coordinator persona); docs and structure should say so.
 3. **Remote member transport (M2)** — board-owner HTTP API (register/post/claim/route/report) + client side; exactly-once over HTTP; instance auth. Build when a project brain genuinely needs its own store (a second repo, or a second box).
 4. **Governance extension (Society B1–B4)** — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.
