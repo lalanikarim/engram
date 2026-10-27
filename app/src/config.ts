@@ -81,7 +81,9 @@ function resolveDir(value: string | undefined, fallback: string): string {
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const token = process.env.API_TOKEN;
   if (!token) throw new Error("API_TOKEN env var is required (see app/.env.example)");
-  const configDir = resolveDir(process.env.CONFIG_DIR, ".");
+  // Issue #48: the override wins over env so per-instance declarative files
+  // (roles.json, tools.json, gates.json) are read from the right directory.
+  const configDir = resolveDir(overrides.configDir ?? process.env.CONFIG_DIR, ".");
 
   const roles = readJson<RoleConfig[]>(path.join(configDir, "roles.json"), []);
   const httpTools = readJson<HttpToolSpec[]>(path.join(configDir, "tools.json"), []);
