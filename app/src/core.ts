@@ -73,7 +73,7 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
   mkdirSync(config.kbDir, { recursive: true });
 
   const modelsConfig = opts.modelsConfig ?? (await loadModelsConfig());
-  const registry = buildRegistry(config, modelsConfig, opts.extraExtensions);
+  const registry = await buildRegistry(config, modelsConfig, opts.extraExtensions);
   const dbPath = path.join(config.dataDir, "agent.sqlite");
 
   // Per-conversation execution environment: the conversation's agent cwd maps into the work root.

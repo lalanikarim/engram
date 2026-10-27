@@ -11,6 +11,7 @@ import type { JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineDocFamily, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
 import { evaluateGate, type CompiledGates, type GateTier } from "./gates.ts";
+import type { ClassifyAction } from "./classifier.ts";
 
 export type ApprovalState = {
   decision: "pending" | "approved" | "denied";
@@ -98,6 +99,10 @@ export type ApprovalRequest = {
   args: Record<string, unknown>;
   /** Risk tier that produced this request ("prompt" | "destructive"). Absent on pre-tier markers. */
   tier?: GateTier;
+  /** Classifier risk score 0..1 (phase 5); absent when the classifier is off or failed. */
+  riskScore?: number;
+  /** One-line classifier rationale for the approver (phase 5). */
+  riskNote?: string;
 };
 
 /** Canonical JSON: object keys sorted recursively, so logically identical args serialize identically. */
@@ -166,16 +171,31 @@ export function parseApprovalMarker(text: string): ApprovalRequest | undefined {
   return undefined;
 }
 
-export function approvalHook(gates: CompiledGates) {
+export function approvalHook(gates: CompiledGates, classify?: ClassifyAction) {
   return hook(ToolTask, {
     beforeTool: async (call, api, ctx) => {
-      const tier = evaluateGate(gates, call.name, call.arguments);
+      let tier = evaluateGate(gates, call.name, call.arguments);
       if (tier === null || tier === "auto") return undefined; // ungated or auto-approved
       // Persistent allow-rules: checked after the destructive guard (destructive never
       // matches) and before the prompt block — matching calls pass silently.
       if (tier === "prompt") {
         const rulesDoc = await api.snapshot(ApprovalRulesDoc, ctx);
         if (rulesDoc && ruleMatches(rulesDoc.rules, call.name, call.arguments)) return undefined;
+      }
+      // Phase 5 classifier: scores prompt-tier actions and may escalate them to
+      // destructive. Fail-safe — any failure keeps the plain prompt tier; it can never
+      // approve or suppress (see classifier.ts invariants).
+      let riskScore: number | undefined;
+      let riskNote: string | undefined;
+      if (tier === "prompt" && classify) {
+        try {
+          const verdict = await classify({ tool: call.name, args: call.arguments });
+          riskScore = verdict.score;
+          riskNote = verdict.note || undefined;
+          if (verdict.destructive || verdict.score >= gates.classifier.threshold) tier = "destructive";
+        } catch (e) {
+          console.error(`[classifier] failed for ${call.name} — falling back to plain prompt: ${(e as Error).message}`);
+        }
       }
       const key = approvalKeyFor(call.name, call.arguments);
       const rec = await api.snapshot(ApprovalDoc, key, ctx);
@@ -189,7 +209,13 @@ export function approvalHook(gates: CompiledGates) {
             `BLOCKED: \u201c${call.name}\u201d was DENIED${by}${why}. Do not retry this action; report that it was declined and adapt if possible.`,
         };
       }
-      const marker = approvalMarker({ key, tool: call.name, args: call.arguments ?? {}, tier });
+      const marker = approvalMarker({
+        key,
+        tool: call.name,
+        args: call.arguments ?? {},
+        tier,
+        ...(riskScore !== undefined ? { riskScore, riskNote } : {}),
+      });
       const warning =
         tier === "destructive"
           ? "This action was classified DESTRUCTIVE. It will run only if the user explicitly acknowledges the risk.\n"

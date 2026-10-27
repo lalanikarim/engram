@@ -1,11 +1,13 @@
 // Registry assembly: all extensions installed for the harness, plus the root agent's
 // standing instructions.
-import { createRegistry, defineExtension, type Extension } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, type Extension, type Registry } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { AppConfig } from "./config.ts";
 import type { ModelsConfig } from "./model.ts";
 import { approvalHook, sendMessageTool } from "./extensions/approvals.ts";
+import { makeClassifyAction, type ClassifyAction } from "./extensions/classifier.ts";
 import { compileGates } from "./extensions/gates.ts";
+import { defaultModelRef, parseModelRef } from "./model.ts";
 import { httpToolExtension } from "./extensions/http-tools.ts";
 import { kbSearchTool } from "./extensions/kb-search.ts";
 import { subagentExtension } from "./extensions/subagents.ts";
@@ -22,20 +24,34 @@ Working rules:
 - Verify multi-step work by actually running it (bash) before reporting success.
 - Be concise.`;
 
-export function buildRegistry(
+export async function buildRegistry(
   config: AppConfig,
   modelsConfig: ModelsConfig,
   extraExtensions: readonly Extension[] = [],
-) {
+): Promise<Registry> {
   const registry = createRegistry();
   registry.install(CodingTools); // scoped per conversation via the harness env cwd
   registry.install(defineExtension({ name: "web", tools: [webFetchTool()] }));
   registry.install(defineExtension({ name: "kb", tools: [kbSearchTool(config.kbDir)] }));
+  const gates = compileGates(config.gates);
+  // Phase 5 classifier (docs/plans/approvals.md): optional; any build failure falls back
+  // to plain prompt-tier gating — classification can never block the gate.
+  let classify: ClassifyAction | undefined;
+  if (gates.classifier.enabled) {
+    try {
+      const ref = gates.classifier.model
+        ? parseModelRef(modelsConfig.models, gates.classifier.model)
+        : await defaultModelRef(modelsConfig);
+      classify = makeClassifyAction(modelsConfig.models, ref, gates.classifier.timeoutMs);
+    } catch (e) {
+      console.error(`[classifier] disabled: ${(e as Error).message}`);
+    }
+  }
   registry.install(
     defineExtension({
       name: "sensitive",
       tools: [sendMessageTool()],
-      hooks: [approvalHook(compileGates(config.gates))], // risk-tiered gate (docs/plans/approvals.md)
+      hooks: [approvalHook(gates, classify)], // risk-tiered gate + classifier (docs/plans/approvals.md)
     }),
   );
   registry.install(subagentExtension(config.roles, modelsConfig));

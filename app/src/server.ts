@@ -160,6 +160,8 @@ async function pendingApprovals(harness: Harness): Promise<Record<string, unknow
               tool: marker.tool,
               args: marker.args,
               tier: marker.tier ?? "prompt",
+              riskScore: marker.riskScore,
+              riskNote: marker.riskNote,
               why: sawAssistant ? undefined : why,
               conversationId: c.id,
               entryId: e.id,

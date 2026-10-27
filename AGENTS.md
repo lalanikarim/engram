@@ -8,8 +8,8 @@ foundation (all gates passed — see `POC-FINDINGS.md`), and the 2-week MVP per 
 sandbox sidecar (D12–13), and the D14 hardening & security pass — see the progress log at
 the bottom of `POC-FINDINGS.md`. Remaining post-MVP: §5 item 7 container packaging. Detailed
 plans for post-MVP work live in `docs/plans/` (model catalog — done; smarter approvals —
-phases 1–4 done [risk tiers + destructive guard + rich prompts/denial reasons + persistent
-allow-rules + TTL + batching], phase 5 next — deferred (classifier scoring).
+all phases done [risk tiers + destructive guard + rich prompts/denial reasons + persistent
+allow-rules + TTL + batching + classifier risk scoring]).
 
 ## Repo layout
 

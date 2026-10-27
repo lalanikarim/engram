@@ -14,5 +14,8 @@
       "default": "prompt"
     },
     { "tool": "send_message", "default": "prompt" }
-  ]
+  ],
+  "classifier": {
+    "enabled": true
+  }
 }

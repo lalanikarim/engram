@@ -17,11 +17,28 @@ export type GateSpec = {
   default?: "prompt";
 };
 
+/**
+ * Classifier-assisted risk scoring (docs/plans/approvals.md, phase 5). A local model scores
+ * prompt-tier actions before the human sees them; it can only escalate to destructive and
+ * annotate — never approve or suppress (see classifier.ts invariants).
+ */
+export type ClassifierSpec = {
+  /** Enable classification of prompt-tier actions. Default false. */
+  enabled?: boolean;
+  /** "<provider>:<modelId>" — the scoring model. Default: the catalog default model. */
+  model?: string;
+  /** Max time for one classification (ms). Default 60000 (local 27B models can be slow). */
+  timeoutMs?: number;
+  /** A score at or above this escalates prompt → destructive. Default 0.7. */
+  destructiveThreshold?: number;
+};
+
 /** gates.json shape. */
 export type GatesConfig = {
   tiers: GateSpec[];
   /** Extra destructive patterns, added to the built-in list (never removed). */
   destructivePatterns?: string[];
+  classifier?: ClassifierSpec;
 };
 
 /** Built-in safety floor — always active regardless of config. */
@@ -41,10 +58,19 @@ export const DEFAULT_DESTRUCTIVE_PATTERNS: string[] = [
 
 export type GateTier = "destructive" | "prompt" | "auto";
 
+export type CompiledClassifier = {
+  enabled: boolean;
+  /** "<provider>:<modelId>" scoring model; undefined → the catalog default at build time. */
+  model?: string;
+  timeoutMs: number;
+  threshold: number;
+};
+
 export type CompiledGates = {
   /** tool → auto patterns + default tier; absent = ungated. */
   tiers: Map<string, { auto: RegExp[]; def: GateTier }>;
   destructive: RegExp[];
+  classifier: CompiledClassifier;
 };
 
 /** Canonical arg text a pattern is matched against: the command for bash, else canonical JSON. */
@@ -82,7 +108,25 @@ export function compileGates(config: GatesConfig | null): CompiledGates {
   const destructive = [...DEFAULT_DESTRUCTIVE_PATTERNS, ...(config?.destructivePatterns ?? [])].map((p) =>
     compilePattern(p, "<destructive>"),
   );
-  return { tiers, destructive };
+  return { tiers, destructive, classifier: compileClassifier(config?.classifier) };
+}
+
+function compileClassifier(spec: ClassifierSpec | undefined): CompiledClassifier {
+  if (spec === undefined) return { enabled: false, timeoutMs: 60_000, threshold: 0.7 };
+  if (spec.enabled !== undefined && typeof spec.enabled !== "boolean") throw new Error("gates.json: classifier.enabled must be a boolean");
+  let model: string | undefined;
+  if (spec.model !== undefined) {
+    const m = /^([^:\s]+):([^:\s]+)$/.exec(spec.model);
+    if (!m) throw new Error(`gates.json: classifier.model must be "<provider>:<modelId>", got "${spec.model}"`);
+    model = spec.model;
+  }
+  const timeoutMs = spec.timeoutMs ?? 60_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error("gates.json: classifier.timeoutMs must be a positive integer");
+  const threshold = spec.destructiveThreshold ?? 0.7;
+  if (typeof threshold !== "number" || !(threshold > 0 && threshold <= 1)) {
+    throw new Error("gates.json: classifier.destructiveThreshold must be a number in (0, 1]");
+  }
+  return { enabled: spec.enabled ?? false, model, timeoutMs, threshold };
 }
 
 function compilePattern(pattern: string, where: string): RegExp {

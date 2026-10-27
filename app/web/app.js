@@ -324,6 +324,7 @@ function ApprovalsBanner({ approvals, onDecided }) {
       ${destructive && html`<span class="a-tier">DESTRUCTIVE</span>`}
       <span class="a-what">${a.tool}: ${renderAction(a.tool, a.args)}</span>
       ${a.why && html`<span class="a-why">Why: ${a.why}</span>`}
+      ${a.riskNote && html`<span class="a-risk" data-testid="risk-note">Risk ${Number(a.riskScore).toFixed(2)}: ${a.riskNote}</span>`}
       <span class="a-key">${a.key}</span>
       <input class="a-reason" placeholder="reason (optional)"
         value=${reasons[a.key] ?? ""} data-testid="reason-input"
