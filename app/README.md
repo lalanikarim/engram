@@ -163,6 +163,12 @@ the first message binds as owner — always set this for real use.
 - **Env** (see `.env.example`): endpoint, token, host/port, dirs, `GATED_TOOLS`
   (comma-separated tool names requiring human approval), compaction sizing, Telegram settings,
   sandbox image/network (`SANDBOX_IMAGE`, `SANDBOX_NETWORK`).
+- **`gates.json`** — risk-tiered approval gates: per-tool `autoPatterns` (pass silently) and
+  `default: "prompt"`, plus built-in destructive patterns that always win. Optional
+  `classifier` block (`enabled`, `model`, `timeoutMs`, `destructiveThreshold`): a local model
+  scores each prompt-tier action before the human sees it — risk score + one-line note on the
+  approval, and escalation to the destructive tier when the score crosses the threshold.
+  The classifier can only escalate/annotate; it never approves or suppresses (fail-safe).
 - **`roles.json`** — subagent roles: name → tools + instructions (`delegate` fans jobs out to
   them in parallel; `failFast: true` short-circuits on first failure).
 - **`tools.json`** — declarative HTTP tools (name, description, method, url template with

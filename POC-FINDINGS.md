@@ -720,6 +720,33 @@ Test fixes found while getting the suite green:
 
 Verification: `tsc --noEmit` clean; `core-instance.test.ts` **15/15** (+4 route-seam checks: route served, exact method+path match, bare core 404s on `/board`, routes are per-instance); `telegram.test.ts` **28/28**; full `npm test` green except the pre-existing api steering flake.
 
+### Smarter approvals phase 5 — classifier risk scoring ✅ COMPLETE (2026-10-26, `feature/approvals-classifier`)
+
+The last deferred approvals feature: a local model scores each prompt-tier action before the
+human sees it. Design decision (fail-safe): the classifier can only **escalate**
+prompt → destructive and **annotate** — it never approves, auto-passes, or suppresses; any
+failure degrades to the plain prompt tier; the approval key stays `sha1(tool + args)`.
+
+- `app/src/extensions/classifier.ts` (new): verdict prompt, robust JSON parsing
+  (`parseVerdict`), escalation rule (`applyVerdict`), `makeClassifyAction(models, ref, timeoutMs)`
+  via `models.streamSimple` with a hard timeout.
+- `gates.json`: optional `classifier` block (`enabled`, `model?`, `timeoutMs?` default 60s,
+  `destructiveThreshold?` default 0.7) — validated at startup; **enabled in `app/gates.json`**.
+- `approvals.ts`: hook scores prompt-tier calls after the allow-rule check; score + note ride on
+  the transcript marker → `GET /approvals` → Web UI risk line + Telegram prompt line.
+- `registry.ts`: builds the classifier (catalog default model unless `classifier.model` set);
+  any build failure logs and falls back to plain gating. `buildRegistry` is now async.
+- Tests: `test/classifier.test.ts` **13/13** unit (parsing, clamping, escalation, config
+  validation); `test/classifier-live.test.ts` **9/9** live (pins the model actually loaded on the
+  endpoint — app/.env's stale `DEFAULT_MODEL` pin is bypassed; classified pending approval,
+  no false escalation, approve → retry → executed once).
+- Docs: `docs/plans/approvals.md` phase 5 section + status; `app/README.md` gates.json config.
+
+Note: this surfaced that `app/.env` pins `DEFAULT_MODEL=spark:RecursiveSI/flint-nvfp4-gguf`,
+which is unloaded and cannot tool-call — every live suite that inherits it runs on a broken
+model. The classifier live test self-pins the loaded model; the other suites still need the
+env pin fixed (or removed, so discovery picks the loaded model).
+
 ### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
 
 The last missing piece of the model-catalog product surface: pick a model when creating a
@@ -747,6 +774,6 @@ on `feature/society-research`.
 Next planned work: M2 remote member transport when a project brain needs its own store;
 Society B1 governance extension — to be built in **its own repo** when we're ready for it
 (owner's decision 2026-10-26). The route seam (ecosystem-flows §5.1), the Collective-app
-reframe (§5.2), and the Web UI model picker are done. Smarter approvals phase 5 (classifier
-scoring) remains deferred; phases 1–4 done.
+reframe (§5.2), the Web UI model picker, and smarter approvals phase 5 (classifier scoring)
+are done — the approvals plan is fully complete.
 Everything else in PLAN §4 is complete.

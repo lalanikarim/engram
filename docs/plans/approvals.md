@@ -1,6 +1,6 @@
 # Smarter approvals — risk tiers, persistent rules, destructive guard
 
-Status: **phases 1–4 implemented** (2026-10-25); phase 5 pending (deferred — classifier scoring). Decisions recorded from discussion with the owner.
+Status: **all phases implemented** — phases 1–4 (2026-10-25), phase 5 classifier scoring (2026-10-26, fail-safe design below). Decisions recorded from discussion with the owner.
 
 ## Current state (what works, what's dumb)
 
@@ -110,10 +110,28 @@ Patterns are deliberately conservative — when in doubt, prompt.
   with per-item Approve/Deny plus "Approve all" (each item still gets its own durable decision;
   destructive items stay separate and explicit). API: `POST /approvals/batch {keys, decision}`.
 
-### Deferred (F)
+### Classifier scoring (F) — phase 5, built 2026-10-26
 
-- Classifier-assisted risk scoring (small local model picks the tier). Revisit only if the
-  `gates.json` pattern config proves unmaintainable in practice.
+A small local model scores each **prompt-tier** action before the human sees it:
+
+- `gates.json` gains an optional `classifier` block: `{ enabled, model?, timeoutMs? (default
+  60000), destructiveThreshold? (default 0.7) }`. `model` is `"<provider>:<modelId>"`; unset →
+  the catalog default model.
+- The hook calls the classifier **after** the allow-rule check and **before** writing the
+  pending marker. Verdict = `{ score: 0..1, destructive: bool, note: ≤200 chars }` parsed from
+  the model's first JSON object (robust to prose/markdown wrapping).
+- **Escalation only**: `destructive: true` or `score ≥ threshold` promotes the action to the
+  destructive tier (explicit acknowledgement UI). The score + note ride on the approval marker
+  → `GET /approvals` → Web UI risk line, Telegram prompt line.
+- **Fail-safe invariants** (must survive any future change):
+  - The classifier NEVER approves, auto-passes, or suppresses a prompt — only humans write
+    decisions; allow-rules stay human-driven.
+  - Any failure (timeout, missing model, malformed output) degrades to the plain prompt tier;
+    classification can never block the gate or let an action through.
+  - The approval key is unchanged (`sha1(tool + canonical args)`); classifier output never
+    feeds it, so crash-retry idempotency is unaffected.
+- `src/extensions/classifier.ts` holds the prompt, parsing, and escalation rule (unit-tested);
+  `makeClassifyAction(models, modelRef, timeoutMs)` builds the live classifier from the catalog.
 
 ## Phases & acceptance
 
@@ -123,6 +141,7 @@ Patterns are deliberately conservative — when in doubt, prompt.
 | 2 | Persistent rules (B) | "Always allow" on a `send_message` → identical-recipient sends pass silently thereafter; rule listed/deleted via API; destructive call never auto-passes | ✅ done — rules unit suite 14/14; live api `[7c]` (approve+alwaysAllow → rule stored, second send silent, destructive alwaysAllow rejected, delete); telegram T7 (button → settle + persisted rule) |
 | 3 | TTL (D) | pending approval past 24 h auto-denies durably and disappears from `/approvals`; agent notified | ✅ done — rules/TTL unit suites; live api `[7d]` (blocked → lapsed → gone from list → durable `ttl` denial → notified) |
 | 4 | Batching (C) | grouped prompt for N pending; "approve all" records N distinct durable decisions | ✅ done — api `[7e]` (batch approve → 200 all decided, not-pending cleared, retry executes both; destructive batch → 400; empty/unknown keys → 400/not_found); telegram grouped ballot + web grouped banner |
+| 5 | Classifier scoring (F) | gated prompt-tier action carries `riskScore` + `riskNote`; high-risk verdict escalates to destructive tier; classification failure degrades to plain prompt tier | ✅ done — unit suite 13/13 (parsing, escalation rule, config validation); live suite 9/9 (classified pending approval, no false escalation, approve → retry → executed) |
 
 Test additions: unit tests for tier evaluation order (destructive > rule > tier), pattern
 matching, TTL expiry, rule matching; live checks in `api.test.ts` / `telegram.test.ts` for the

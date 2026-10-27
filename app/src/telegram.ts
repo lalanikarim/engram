@@ -446,6 +446,8 @@ export class TelegramClient {
           args: Record<string, unknown>;
           tier?: string;
           why?: string;
+          riskScore?: number;
+          riskNote?: string;
           conversationId: number;
         }>;
       };
@@ -504,18 +506,19 @@ export class TelegramClient {
 
   /** One approval request as its own message with per-action buttons. */
   private async postSingle(
-    a: { key: string; tool: string; args: Record<string, unknown>; tier?: string; why?: string },
+    a: { key: string; tool: string; args: Record<string, unknown>; tier?: string; why?: string; riskScore?: number; riskNote?: string },
     chatKey: string,
     convId: number,
   ): Promise<void> {
     const destructive = a.tier === "destructive";
     const action = renderAction(a.tool, a.args).slice(0, 500);
     const whyLine = a.why ? `\nWhy: ${a.why.slice(0, 300)}` : "";
+    const riskLine = a.riskNote ? `\nRisk ${Number(a.riskScore).toFixed(2)}: ${a.riskNote.slice(0, 200)}` : "";
     const badge = destructive ? "⚠️ DESTRUCTIVE — " : "";
     const r = await this.tg("sendMessage", {
       ...this.msgTarget(chatKey),
       text:
-        `${destructive ? "🔴" : "⚠️"} ${badge}The agent wants to run \`${a.tool}\`:\n${action}${whyLine}\nKey: \`${a.key}\`` +
+        `${destructive ? "🔴" : "⚠️"} ${badge}The agent wants to run \`${a.tool}\`:\n${action}${whyLine}${riskLine}\nKey: \`${a.key}\`` +
         (destructive
           ? "\nThis action is destructive. Approving requires explicitly acknowledging the risk. Deny with a reason via: deny <key> because …"
           : "\nDeny with a reason via: deny <key> because …"),
