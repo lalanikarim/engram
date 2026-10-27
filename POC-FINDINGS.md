@@ -720,16 +720,33 @@ Test fixes found while getting the suite green:
 
 Verification: `tsc --noEmit` clean; `core-instance.test.ts` **15/15** (+4 route-seam checks: route served, exact method+path match, bare core 404s on `/board`, routes are per-instance); `telegram.test.ts` **28/28**; full `npm test` green except the pre-existing api steering flake.
 
+### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
+
+The last missing piece of the model-catalog product surface: pick a model when creating a
+conversation, and switch any conversation's model from the chat header.
+
+- `app/web/app.js`: new `ModelSelect` component (catalog from `GET /models`, grouped by provider,
+  unavailable models disabled, "default" option). Wired into the new-conversation form (`model`
+  on `POST /conversations`) and the chat header (`PATCH /conversations/:id {model | null}`).
+- `app/web/index.html`: select styling.
+- `app/test/webui.test.ts`: +6 checks → **20/20** (catalog availability, both selects render,
+  create-with-model durable, switch durable, reset-to-default durable).
+- `app/README.md`: Web UI section + API table now document `GET /models`,
+  `PATCH /conversations/:id`, and the picker.
+
+Verification: `tsc --noEmit` clean; `node test/webui.test.ts` **20 passed, 0 failed** (live model).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);
-the Web UI model picker is not built (the API surface for it is ready). Board (Project 0):
+Web UI model picker — done. Board (Project 0):
 phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective): phases A1 (domain memory),
 A2 (peer trust tier + untrusted peer input), A3 (containment of a bad member), and A4 (standing team +
 coordinator triage, end-to-end) complete — the Collective MVP is DONE. Option B (Society) research continues
 on `feature/society-research`.
-Next planned work (per `docs/ecosystem-flows.md` §5): M2 remote member transport when a project
-brain needs its own store; Society B1 governance extension. The route seam (§5.1) and the
-Collective-app reframe (§5.2) are done. Smarter approvals phase 5 (classifier scoring) remains
-deferred; phases 1–4 done.
+Next planned work: M2 remote member transport when a project brain needs its own store;
+Society B1 governance extension — to be built in **its own repo** when we're ready for it
+(owner's decision 2026-10-26). The route seam (ecosystem-flows §5.1), the Collective-app
+reframe (§5.2), and the Web UI model picker are done. Smarter approvals phase 5 (classifier
+scoring) remains deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

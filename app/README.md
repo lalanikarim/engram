@@ -39,9 +39,10 @@ npm test                  # two live-model suites against a real server over tem
 #   test/telegram.test.ts 18 checks: binding, task→progress→answer, access control,
 #                         inline approval button → callback → settle → retry, topic→fork, state file
 
-node test/webui.test.ts   # 14 Playwright e2e checks (needs a local Playwright install —
+node test/webui.test.ts   # 20 Playwright e2e checks (needs a local Playwright install —
                           # not a repo dependency): token gate, live-streamed answers,
-                          # steering, approvals panel + exactly-once execution, new conversations
+                          # steering, approvals panel + exactly-once execution, new
+                          # conversations, per-conversation model picker (create + switch + reset)
 
 node test/sandbox.test.ts   # 16 checks (needs Podman + the sandbox image): exec timeout
                           # contract, container isolation (no host secrets, egress blocked,
@@ -105,9 +106,10 @@ board research: [`docs/research/board.md`](../docs/research/board.md). Tests: `t
 
 Open `http://HOST:PORT/` — a single-page app (Preact + htm, served from `node_modules`,
 no build step) with a token gate. Static assets are public; every data route keeps its
-bearer-token requirement. It supports: conversation list + creation, full transcript view,
-live streaming via SSE (cursor-based reconnect), steering a running turn, and the
-pending-approvals panel (Approve/Deny → 409-safe idempotent decisions).
+bearer-token requirement. It supports: conversation list + creation (with model pick), full
+transcript view, live streaming via SSE (cursor-based reconnect), steering a running turn,
+per-conversation model switching (chat header), and the pending-approvals panel
+(Approve/Deny → 409-safe idempotent decisions).
 
 ## Sandboxed execution (D12–13)
 
@@ -133,9 +135,11 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | `POST /tasks` | `{content, requestId[, conversationId]}` → exactly-once submit (202 `{submissionId}`). Resubmitting a `requestId` returns the same submission. |
 | `GET /stream?conversationId=&cursor=` | SSE: durable entries (id > cursor) + lifecycle events (`run_start`, `run_end`, `tool_execution_start`, `message_update`, `submission`). Reconnect with the last seen entry id as `cursor`. |
 | `GET /conversations` | list all conversations: id, name, cwd, sandbox, createdAt, lastEntryId, openSubmissions |
-| `POST /conversations` | `{cwd?, name?, sandbox?}` → new conversation; `cwd` (relative, no traversal) maps to `work/<cwd>`; `sandbox: true` routes execution into a Podman sidecar |
+| `POST /conversations` | `{cwd?, name?, sandbox?, model?}` → new conversation; `cwd` (relative, no traversal) maps to `work/<cwd>`; `sandbox: true` routes execution into a Podman sidecar; `model` (`"<provider>:<modelId>"`) pins the conversation's model |
 | `GET /conversations/:id/entries?after=&limit=` | full transcript entries after a cursor (history rendering, final-answer text) |
 | `POST /conversations/:id/fork` | `{name?}` → fork the conversation at its current head (Telegram forum topics); falls back to a fresh sibling when the parent has no entries |
+| `PATCH /conversations/:id` | `{model?: "<provider>:<modelId>" \| null}` → durable per-conversation model switch (`null` resets to the global default) |
+| `GET /models` | full catalog: every provider's models with availability + the default ref |
 | `POST /steer` | `{content, requestId[, conversationId]}` → inject input into a running turn (`whenBusy: "steer"`) |
 | `GET /board` | board dashboard: members, open jobs, channels, knowledge + pending approvals (app-registered route) |
 | `GET /approvals` | pending approval requests discovered from transcript markers |

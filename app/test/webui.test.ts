@@ -202,8 +202,20 @@ async function main() {
     check("approval panel clears after decision", bannerGone);
   }
 
-  // ---- new conversation from the sidebar ----
-  console.log("\n[W5] create a new conversation and use it");
+  // ---- new conversation from the sidebar (with a model pick) ----
+  console.log("\n[W5] create a new conversation (with a model pick) and use it");
+  const modelsRes = await api("/models");
+  const catalogModels = modelsRes.json?.models ?? [];
+  const defaultRef = modelsRes.json?.default;
+  const availableRefs: string[] = catalogModels.filter((m: any) => m.available).map((m: any) => `${m.provider}:${m.id}`);
+  check("catalog lists at least one available model", availableRefs.length > 0, `available=${availableRefs.length}`);
+  let pickedAtCreate: string | null = null;
+  const newSelVisible = await page.waitForSelector('[data-testid="new-conv-model"]', { timeout: 10_000 }).then(() => true).catch(() => false);
+  check("model select shown in the new-conversation form", newSelVisible);
+  if (newSelVisible && availableRefs.length > 0) {
+    pickedAtCreate = availableRefs[0];
+    await page.selectOption('[data-testid="new-conv-model"]', pickedAtCreate);
+  }
   await page.fill('input[placeholder="Name (optional)"]', "web-conv");
   await page.click('[data-testid="new-conv-btn"]');
   const listed = await page
@@ -212,6 +224,13 @@ async function main() {
     .catch(() => false);
   check("new conversation listed", listed);
   if (listed) {
+    const convs0 = ((await api("/conversations")).json?.conversations ?? []) as any[];
+    const webConv0 = convs0.find((c) => c.name === "web-conv");
+    check(
+      "new conversation created with the picked model",
+      webConv0?.model === (pickedAtCreate ?? defaultRef),
+      `model=${webConv0?.model} want=${pickedAtCreate ?? defaultRef}`,
+    );
     await page.click(`[data-testid="conv-item"]:has-text("web-conv")`);
     await page.fill('[data-testid="composer"]', "Say exactly WEB-CONV and nothing else.");
     await page.keyboard.press("Enter");
@@ -220,6 +239,24 @@ async function main() {
       .then(() => true)
       .catch(() => false);
     check("task answered in the new conversation", convAnswer);
+  }
+
+  // ---- per-conversation model switch in the chat header ----
+  console.log("\n[W6] per-conversation model picker");
+  const headSelVisible = await page.waitForSelector('[data-testid="conv-model-select"]', { timeout: 10_000 }).then(() => true).catch(() => false);
+  check("model select shown in the chat header", headSelVisible);
+  if (headSelVisible && availableRefs.length > 0) {
+    const target = availableRefs.find((r) => r !== defaultRef) ?? availableRefs[0];
+    await page.selectOption('[data-testid="conv-model-select"]', target);
+    await new Promise((r) => setTimeout(r, 750)); // let the PATCH commit
+    let convs = ((await api("/conversations")).json?.conversations ?? []) as any[];
+    let webConv = convs.find((c) => c.name === "web-conv");
+    check("model switch is durable", webConv?.model === target, `model=${webConv?.model} want=${target}`);
+    await page.selectOption('[data-testid="conv-model-select"]', "");
+    await new Promise((r) => setTimeout(r, 750));
+    convs = ((await api("/conversations")).json?.conversations ?? []) as any[];
+    webConv = convs.find((c) => c.name === "web-conv");
+    check("reset returns the conversation to the default model", webConv?.model === defaultRef, `model=${webConv?.model} want=${defaultRef}`);
   }
 
   // ---- no JS errors ----
