@@ -5,8 +5,9 @@
 import path from "node:path";
 import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
-import { boardExtension, readBoardDashboard, registerMemberInTx } from "./extensions/board.ts";
+import { boardExtension, readBoardDashboard, registerMemberInTx, setMemberIdentityInTx, validateEndpoint } from "./extensions/board.ts";
 import { ConversationMeta } from "./meta.ts";
+import { readJsonBody } from "./server.ts";
 import { defaultModelRef, formatModelRef, loadModelsConfig } from "./model.ts";
 import { ROOT_INSTRUCTIONS } from "./registry.ts";
 import { createCoreInstance } from "./core.ts";
@@ -38,13 +39,70 @@ async function main() {
           rc.json(res, 200, { ...dashboard, pendingApprovals: approvals });
         },
       },
+      // M2: register a member (local or remote) on this instance's board. Human surface —
+      // the coordinator does the same through the `register` tool.
+      {
+        method: "POST",
+        path: "/board/members",
+        handle: async (req, res, rc) => {
+          let body: Record<string, unknown>;
+          try {
+            body = await readJsonBody(req);
+          } catch {
+            rc.json(res, 400, { error: "invalid JSON body" });
+            return;
+          }
+          const id = typeof body.id === "string" && body.id.trim() ? body.id.trim() : "";
+          const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "";
+          const endpoint = typeof body.endpoint === "string" && body.endpoint.trim() ? body.endpoint.trim() : null;
+          const tokenRef = typeof body.tokenRef === "string" && body.tokenRef.trim() ? body.tokenRef.trim() : null;
+          const conversationId = Number.isInteger(body.conversationId) && (body.conversationId as number) > 0 ? (body.conversationId as number) : null;
+          const trustLevel = body.trustLevel === "trusted" || body.trustLevel === "untrusted" ? body.trustLevel : "untrusted";
+          const capabilities = Array.isArray(body.capabilities) ? (body.capabilities as unknown[]).filter((c): c is string => typeof c === "string") : [];
+          const allowedTargets = Array.isArray(body.allowedTargets) ? (body.allowedTargets as unknown[]).filter((t): t is string => typeof t === "string") : [];
+          if (!id || !name || conversationId === null) {
+            rc.json(res, 400, { error: "body must be {id, name, conversationId[, endpoint, tokenRef, trustLevel, capabilities, allowedTargets]}" });
+            return;
+          }
+          if (endpoint) {
+            const err = validateEndpoint(endpoint);
+            if (err) {
+              rc.json(res, 400, { error: err });
+              return;
+            }
+            if (!tokenRef) {
+              rc.json(res, 400, { error: "remote member needs a tokenRef (a name in this instance's BOARD_PEER_TOKENS env)" });
+              return;
+            }
+          }
+          await rc.harness.commit(
+            (tx) =>
+              registerMemberInTx(tx, {
+                id,
+                name,
+                kind: "member",
+                conversationId,
+                trustLevel,
+                capabilities,
+                allowedTargets,
+                status: "active",
+                description: "",
+                endpoint,
+                tokenRef,
+              }),
+            rc.ctx,
+          );
+          rc.json(res, 201, { id, endpoint });
+        },
+      },
     ],
     rootAgent: { model: defaultRef, thinkingLevel: "medium", instructions: ROOT_INSTRUCTIONS },
     rootInit: async (tx, conversationId) => {
       const d = await tx.doc(ConversationMeta, conversationId);
       if (!d.name) d.name = "root";
       d.createdAt = Date.now();
-      // Register the coordinator as a board member (deterministic, at creation).
+      // Register the coordinator as a board member (deterministic, at creation) and give
+      // the root conversation its self-identity so routed messages are labeled "coordinator".
       await registerMemberInTx(tx, {
         id: "coordinator",
         name: "coordinator",
@@ -56,6 +114,7 @@ async function main() {
         status: "active",
         description: "The standing coordinator brain.",
       });
+      await setMemberIdentityInTx(tx, conversationId, "coordinator");
       return undefined;
     },
   });

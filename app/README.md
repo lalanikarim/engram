@@ -87,6 +87,15 @@ disabled/enabled centrally and durably (`disable_member`/`enable_member`). The h
 the coordinator, reads `GET /board` (or Telegram `/board`), and approves — member side effects still
 route through the standard approval gates.
 
+**Remote members (M2.1)**: a member can live on *another engram instance* — its profile carries an
+`endpoint` (that instance's base URL) and a `tokenRef` (a name in this board owner's
+`BOARD_PEER_TOKENS` env; the bearer token itself is never stored in SQLite). `route_message` to a
+remote member POSTs to that instance's `/tasks` with a stable exactly-once request id, wrapped in
+the same `<untrusted>` delimiters (remote members default to `trustLevel: "untrusted"`).
+Registration goes through the coordinator's `register` tool or `POST /board/members`; the Web board
+panel marks such members with a `remote` badge. Design + decisions:
+[`docs/plans/m2-remote-members.md`](../docs/plans/m2-remote-members.md).
+
 | Tool | Who | Purpose |
 |---|---|---|
 | `create_member` | coordinator/human | register a named member (own conversation + workspace) |
@@ -142,6 +151,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | `GET /models` | full catalog: every provider's models with availability + the default ref |
 | `POST /steer` | `{content, requestId[, conversationId]}` → inject input into a running turn (`whenBusy: "steer"`) |
 | `GET /board` | board dashboard: members, open jobs, channels, knowledge + pending approvals (app-registered route) |
+| `POST /board/members` | register/update a member (incl. remote: `endpoint` + `tokenRef`) — idempotent on `id` |
 | `GET /approvals` | pending approval requests discovered from transcript markers |
 | `POST /approvals/:key` | `{decision: "approved" \| "denied"}` → durable decision (409 if already decided — idempotent under double-tap races) |
 

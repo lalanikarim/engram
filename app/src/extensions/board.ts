@@ -42,7 +42,10 @@ export type EngramProfile = {
   id: string;
   name: string;
   kind: "coordinator" | "member";
-  /** The pi-durable conversation that is this member (M1: in-harness). */
+  /**
+   * The pi-durable conversation that is this member. M1: a local conversation on this
+   * instance. M2 (remote member): the conversation id ON THE REMOTE INSTANCE named by `endpoint`.
+   */
   conversationId: number;
   trustLevel: "trusted" | "untrusted";
   capabilities: string[];
@@ -51,6 +54,10 @@ export type EngramProfile = {
   /** Containment (A3): a disabled member is frozen from the board — it cannot claim, route, post, or record memory. Set only by the coordinator/human; durable across restart. */
   status: "active" | "disabled";
   description: string;
+  /** M2: when set, this member lives on a remote instance (base URL) — delivery is HTTP, not local submit. */
+  endpoint?: string | null;
+  /** M2: name of the peer token in the board owner's BOARD_PEER_TOKENS env (the token itself is never stored in the doc). */
+  tokenRef?: string | null;
 };
 
 /** A unit of work posted to the board. */
@@ -72,7 +79,7 @@ const EngramDoc = defineDocFamily<EngramProfile, JsonValue>({
   scope: "session",
   kind: "board.engram",
   version: 1,
-  initial: () => ({ id: "", name: "", kind: "member", conversationId: 0, trustLevel: "untrusted", capabilities: [], allowedTargets: [], status: "active", description: "" }),
+  initial: () => ({ id: "", name: "", kind: "member", conversationId: 0, trustLevel: "untrusted", capabilities: [], allowedTargets: [], status: "active", description: "", endpoint: null, tokenRef: null }),
 });
 
 const JobDoc = defineDocFamily<Job, JsonValue>({
@@ -192,6 +199,8 @@ export async function registerMemberInTx(tx: Tx, profile: EngramProfile): Promis
   d.allowedTargets = profile.allowedTargets ?? [];
   d.status = profile.status ?? "active";
   d.description = profile.description;
+  d.endpoint = profile.endpoint ?? null;
+  d.tokenRef = profile.tokenRef ?? null;
   const idx = await tx.doc(EngramIndexDoc);
   if (!idx.ids.includes(profile.id)) idx.ids.push(profile.id);
 }
@@ -321,6 +330,12 @@ export async function memberIdentityOf(reader: DocumentReader, conversationId: C
   return d && d.memberId ? d.memberId : null;
 }
 
+/** Set a conversation's member self-identity (used by the app's rootInit for the coordinator). */
+export async function setMemberIdentityInTx(tx: Tx, conversationId: ConversationId, memberId: string): Promise<void> {
+  const ident = await tx.doc(MemberIdDoc, conversationId);
+  ident.memberId = memberId;
+}
+
 /** Append a durable note to a member's domain memory (atomic). Append-only log. Returns false if the member is disabled. */
 export async function rememberInTx(tx: Tx, memberId: string, note: string): Promise<boolean> {
   if (await isDisabledInTx(tx, memberId)) return false; // A3: a disabled member cannot record memory
@@ -350,13 +365,72 @@ function simpleHash(s: string): string {
   return createHash("sha1").update(s).digest("hex").slice(0, 12);
 }
 
+/**
+ * A resolved route target. `endpoint` is set only for M2 remote members — their
+ * `conversationId` then refers to a conversation ON THE REMOTE INSTANCE.
+ */
+export type RouteTarget = {
+  kind: "member" | "channel";
+  conversationId: number;
+  endpoint?: string;
+  tokenRef?: string | null;
+};
+
 /** Resolve a route target (member id or channel id) to its conversation + kind. Null if unknown. */
-export async function resolveRouteInTx(tx: Tx, target: string): Promise<{ conversationId: number; kind: "member" | "channel" } | null> {
+export async function resolveRouteInTx(tx: Tx, target: string): Promise<RouteTarget | null> {
   const m = await tx.doc(EngramDoc, target, {});
-  if (m.id !== "") return { conversationId: m.conversationId, kind: "member" };
+  if (m.id !== "") {
+    return m.endpoint
+      ? { kind: "member", conversationId: m.conversationId, endpoint: m.endpoint, tokenRef: m.tokenRef ?? null }
+      : { kind: "member", conversationId: m.conversationId };
+  }
   const c = await tx.doc(ChannelDoc, target, {});
   if (c.id !== "") return { conversationId: c.conversationId, kind: "channel" };
   return null;
+}
+
+// ---- M2 remote member transport (outbound dispatch) -------------------------
+
+/** Parse BOARD_PEER_TOKENS ("name:token,name2:token2") into a lookup. Malformed parts are skipped. */
+export function parsePeerTokens(env: Record<string, string | undefined>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const part of (env.BOARD_PEER_TOKENS ?? "").split(",")) {
+    const i = part.indexOf(":");
+    if (i <= 0) continue;
+    const name = part.slice(0, i).trim();
+    const token = part.slice(i + 1).trim();
+    if (name && token) out.set(name, token);
+  }
+  return out;
+}
+
+/**
+ * Stable exactly-once request id for a routed message: identical sender+target+content
+ * map to the same id, so a crash-retry of the dispatch reuses it and the receiving
+ * instance de-duplicates (its /tasks is exactly-once per requestId).
+ */
+export function messageRequestId(senderLabel: string, to: string, content: string): string {
+  return `msg-${simpleHash(`${senderLabel}|${to}|${content}`)}`;
+}
+
+/**
+ * Deliver a message to a remote member instance: bearer-authenticated POST {endpoint}/tasks.
+ * Fire-and-forget on 202 — we do NOT wait for the remote run (that would couple the
+ * instances' lifecycles); the peer processes it in its own loop.
+ */
+export async function dispatchRemoteMessage(opts: {
+  endpoint: string;
+  token: string;
+  conversationId: number;
+  content: string;
+  requestId: string;
+}): Promise<void> {
+  const res = await fetch(`${opts.endpoint.replace(/\/+$/, "")}/tasks`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${opts.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ content: opts.content, requestId: opts.requestId, conversationId: opts.conversationId }),
+  });
+  if (res.status !== 202) throw new Error(`remote delivery failed: HTTP ${res.status} from ${opts.endpoint}`);
 }
 
 // ---- Peer trust tier + untrusted peer input (Phase A2) ----------------------
@@ -511,20 +585,41 @@ export async function readBoardDashboard(reader: DocumentReader, ctx: Context): 
 
 // ---- Tools -------------------------------------------------------------------
 
+/** Validate a remote-member endpoint (http/https base URL). Returns an error string or null. */
+export function validateEndpoint(endpoint: string): string | null {
+  try {
+    const u = new URL(endpoint);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return `endpoint must be http(s), got "${endpoint}"`;
+    return null;
+  } catch {
+    return `invalid endpoint URL "${endpoint}"`;
+  }
+}
+
 const registerTool = defineTool({
   name: "register",
-  description: "Register an engram member on the shared board (coordinator only). Idempotent on id.",
+  description:
+    "Register an engram member on the shared board (coordinator only). Idempotent on id. For a REMOTE member (M2), pass endpoint (the peer instance base URL) + tokenRef (a name in this instance's BOARD_PEER_TOKENS env); conversationId is then the member's conversation id ON THAT INSTANCE.",
   parameters: Type.Object({
     id: Type.String({ description: "Stable member id (unique)." }),
     name: Type.String({ description: "Human-readable member name." }),
     kind: Type.Union([Type.Literal("member"), Type.Literal("coordinator")]),
-    conversationId: Type.Number({ description: "The pi-durable conversation that is this member." }),
+    conversationId: Type.Number({ description: "The pi-durable conversation that is this member (on the remote instance when endpoint is set)." }),
     trustLevel: Type.Union([Type.Literal("trusted"), Type.Literal("untrusted")]),
     capabilities: Type.Array(Type.String()),
     allowedTargets: Type.Optional(Type.Array(Type.String())),
+    endpoint: Type.Optional(Type.String({ description: "M2: base URL of the remote instance hosting this member (e.g. http://host:port)." })),
+    tokenRef: Type.Optional(Type.String({ description: "M2: name of the peer token in BOARD_PEER_TOKENS used to authenticate to that instance." })),
   }),
   replay: "unsafe",
   execute: async (args, api, ctx) => {
+    const endpoint = args.endpoint ?? null;
+    const tokenRef = args.tokenRef ?? null;
+    if (endpoint) {
+      const err = validateEndpoint(endpoint);
+      if (err) return { output: [{ type: "text" as const, text: err }] };
+      if (!tokenRef) return { output: [{ type: "text" as const, text: `remote member needs a tokenRef (a name in BOARD_PEER_TOKENS) — the board owner cannot authenticate to "${endpoint}" without one` }] };
+    }
     await api.commit(
       async (tx) =>
         registerMemberInTx(tx, {
@@ -537,10 +632,13 @@ const registerTool = defineTool({
           allowedTargets: args.allowedTargets ?? [],
           status: "active",
           description: "",
+          endpoint,
+          tokenRef,
         }),
       ctx,
     );
-    const text = `Registered ${args.kind} "${args.name}" (${args.id}).`;
+    const remote = endpoint ? ` on ${endpoint}` : "";
+    const text = `Registered ${args.kind} "${args.name}" (${args.id})${remote}.`;
     return { output: [{ type: "text" as const, text }] };
   },
 });
@@ -677,9 +775,22 @@ const routeMessageTool = defineTool({
     if (!route) return { output: [{ type: "text" as const, text: `unknown target "${args.to}"` }] };
     const senderLabel = senderId ?? "human";
     // Exactly-once: a stable requestId from sender+target+content so a crash-retry reuses it and doesn't duplicate.
-    const requestId = `msg-${simpleHash(`${senderLabel}|${args.to}|${args.content}`)}`;
+    const requestId = messageRequestId(senderLabel, args.to, args.content);
     // Untrusted peer input (A2): the body is delivered as delimited data, never instructions.
     const text = `[${senderLabel} -> ${route.kind}:${args.to}] ${renderPeerMessageUntrusted(senderLabel, args.content)}`;
+    if (route.endpoint) {
+      // M2 remote member: deliver over HTTP to the peer instance (fire-and-forget on 202).
+      const token = parsePeerTokens(process.env).get(route.tokenRef ?? "");
+      if (!token) {
+        return { output: [{ type: "text" as const, text: `no peer credentials for "${args.to}" (tokenRef "${route.tokenRef ?? "unset"}") — check BOARD_PEER_TOKENS on this instance` }] };
+      }
+      try {
+        await dispatchRemoteMessage({ endpoint: route.endpoint, token, conversationId: route.conversationId, content: text, requestId });
+      } catch (e) {
+        return { output: [{ type: "text" as const, text: `remote delivery to "${args.to}" failed: ${(e as Error).message}` }] };
+      }
+      return { output: [{ type: "text" as const, text: `routed message to remote member "${args.to}" (accepted by the peer instance)` }] };
+    }
     const target = await api.conversation(route.conversationId as ConversationId, ctx);
     if (!target) return { output: [{ type: "text" as const, text: `target "${args.to}" has no conversation` }] };
     await target.submit({ type: "input", content: text, requestId }, ctx);

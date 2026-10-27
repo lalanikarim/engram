@@ -321,5 +321,9 @@ every bump.
 
 1. ~~**Route seam in kernel**~~ — **done**: `createCoreInstance({ routes })` / `ServerDeps.routes`; `/board` now registers from the product layer (`main.ts`), the kernel is board-free.
 2. ~~**Reframe `app/` as the Collective app**~~ — **done**: READMEs, module headers, and repo docs now name it as such; the board is documented in `app/README.md`.
-3. **Remote member transport (M2)** — board-owner HTTP API (register/post/claim/route/report) + client side; exactly-once over HTTP; instance auth. Build when a project brain genuinely needs its own store (a second repo, or a second box).
+3. ~~**Remote member transport (M2)**~~ — **M2.1 done** (2026-10-27): remote members on other instances
+   (`endpoint` + `tokenRef`, tokens only in the board owner's `BOARD_PEER_TOKENS` env);
+   `route_message` dispatches to the peer's `/tasks` — exactly-once by requestId, fire-and-forget
+   on 202, untrusted-wrapped inbound. M2.2 next: board-owner RPC API (claim/report/route-back) +
+   client extension. Design and decisions: [`plans/m2-remote-members.md`](plans/m2-remote-members.md).
 4. **Governance extension (Society B1–B4)** — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.

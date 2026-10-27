@@ -245,7 +245,8 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(JSON.stringify(body));
 }
 
-async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+/** Read a JSON request body (bounded). Exported for app-registered routes. */
+export async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
