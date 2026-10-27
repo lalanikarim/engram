@@ -377,7 +377,7 @@ function BoardPanel({ board }) {
     <div class="side-head"><span>Board</span><span class="badge">${openJobs.length} open</span></div>
     <div class="board-list">
       <div class="board-group">Members (${members.length})</div>
-      ${members.map((m) => html`<div class="board-row"><span>${m.name}</span><span class="badge">${m.kind}</span></div>`)}
+      ${members.map((m) => html`<div class="board-row"><span>${m.name}</span><span class="badge">${m.kind}</span>${m.endpoint ? html`<span class="badge" data-testid="remote-badge">remote</span>` : ""}</div>`)}
       <div class="board-group">Open jobs</div>
       ${openJobs.length
         ? openJobs.map((j) => html`<div class="board-row"><span>${j.id} — ${j.title}</span></div>`)

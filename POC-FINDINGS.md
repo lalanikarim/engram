@@ -747,6 +747,37 @@ which is unloaded and cannot tool-call — every live suite that inherits it run
 model. The classifier live test self-pins the loaded model; the other suites still need the
 env pin fixed (or removed, so discovery picks the loaded model).
 
+### M2.1 remote member transport ✅ COMPLETE (2026-10-27)
+
+Federated boards: a board member can live on **another engram instance**. Design + decisions in
+[`docs/plans/m2-remote-members.md`](plans/m2-remote-members.md). Shipped:
+
+- `EngramProfile` gains optional `endpoint` (base URL of the member's instance) + `tokenRef`
+  (a NAME — bearer tokens live only in the board owner's `BOARD_PEER_TOKENS` env, never in the
+  SQLite docs; consistent with A3 "no shared secrets").
+- `resolveRouteInTx` now returns a `RouteTarget`; for remote members it carries `endpoint`/`tokenRef`
+  and the meaning of `conversationId` shifts to *the id on the remote instance*. Everything above
+  the seam is unchanged: untrusted wrapping, allowlists (`canRouteInTx`), trust tiers — remote
+  members default to `untrusted`.
+- `route_message`: local branch untouched; remote branch resolves the token from env and does a
+  bearer-auth `POST {endpoint}/tasks` (fire-and-forget on 202). Exactly-once reuses M1's stable
+  `requestId = msg-<sha1(sender|to|content)>` — crash-retries de-duplicate on the peer side.
+  Missing credentials / unreachable peer / non-202 → clear retryable error (safe to retry).
+- Registration: coordinator `register` tool accepts optional `endpoint`/`tokenRef` (validated),
+  plus a human-facing `POST /board/members` app-registered route on the board owner. Idempotent;
+  re-registering without `endpoint` clears the remote fields.
+- Surfaces: Web board panel shows a `remote` badge; `GET /board` carries `endpoint`.
+- Fix found along the way: `rootInit` now writes the coordinator's `MemberIdDoc`, so messages routed
+  from the root are labeled `coordinator` (previously fell back to the `human` label — fine via the
+  human bypass, wrong as provenance).
+- Verification: `board-remote.test.ts` **14/14** unit (token parsing, endpoint validation, request-id
+  stability, remote registration/resolution, allowlist interaction, dispatch vs a stub peer incl.
+  auth header/body/non-202/unreachable); `board-remote-live.test.ts` **10/10** live — two real
+  instances, coordinator routes over HTTP, peer transcript shows the untrusted-wrapped message;
+  regression: `board.test.ts` 66/66, `board-live.test.ts` 6/6.
+- M2.2 next: board-owner RPC API (claim/report/route-back) + thin client extension on the remote
+  instance so members can participate in the work loop, not just receive messages.
+
 ### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
 
 The last missing piece of the model-catalog product surface: pick a model when creating a
