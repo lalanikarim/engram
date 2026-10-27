@@ -14,7 +14,9 @@ allow-rules + TTL + batching], phase 5 next — deferred (classifier scoring).
 ## Repo layout
 
 - `poc/` — standalone PoC scripts (`00`–`10`) + shared libs in `poc/lib/`
-- `app/` — the MVP agent (TS, run natively by Node ≥22.19): `src/` (server, extensions),
+- `app/` — the **Collective app** on the composable core (`src/core.ts`): project brain +
+  shared board (`src/extensions/board.ts`: members, jobs, channels, knowledge) + Telegram;
+  TS, run natively by Node ≥22.19: `src/` (server, extensions),
   `test/api.test.ts` (48-check live-model integration suite incl. crash recovery),
   `roles.json`/`tools.json` (declarative config), `kb/` (knowledge base), `Dockerfile`.
   Run: `cd app && npm install && npm start`; test: `npm test`.

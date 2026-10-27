@@ -728,7 +728,8 @@ phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective)
 A2 (peer trust tier + untrusted peer input), A3 (containment of a bad member), and A4 (standing team +
 coordinator triage, end-to-end) complete — the Collective MVP is DONE. Option B (Society) research continues
 on `feature/society-research`.
-Next planned work (per `docs/ecosystem-flows.md` §5): reframe `app/` as the Collective app; M2 remote
-member transport when a project brain needs its own store; Society B1 governance extension. Smarter
-approvals phase 5 (classifier scoring) remains deferred; phases 1–4 done.
+Next planned work (per `docs/ecosystem-flows.md` §5): M2 remote member transport when a project
+brain needs its own store; Society B1 governance extension. The route seam (§5.1) and the
+Collective-app reframe (§5.2) are done. Smarter approvals phase 5 (classifier scoring) remains
+deferred; phases 1–4 done.
 Everything else in PLAN §4 is complete.

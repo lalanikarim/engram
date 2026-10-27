@@ -1,7 +1,7 @@
 # Engram
 
 A **durable, local-model "project brain" agent** built on
-[pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable) (Earendil's durable agent harness), plus companion proof-of-concepts.
+[pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable) (Earendil's durable agent harness), plus companion proof-of-concepts. The app in [`app/`](app/) is the **Collective**: a project brain with a shared board — a standing team of named members (own workspaces, models, domain memory) coordinated by the root conversation. Ecosystem framing (kernel vs. apps; solo / collective / society / drydock flows): [`docs/ecosystem-flows.md`](docs/ecosystem-flows.md).
 
 **Status:** the PoC validated every capability assumption (all gates passed —
 [`POC-FINDINGS.md`](POC-FINDINGS.md)), and the 2-week MVP per [`PLAN.md`](PLAN.md) is **complete**:

@@ -1037,7 +1037,7 @@ never shared SQLite.</li>
 <h3>Open work this paradigm implies (in dependency order)</h3>
 <ol>
 <li><del><strong>Route seam in kernel</strong></del> — <strong>done</strong>: <code>createCoreInstance({ routes })</code> / <code>ServerDeps.routes</code>; <code>/board</code> now registers from the product layer (<code>main.ts</code>), the kernel is board-free.</li>
-<li><strong>Reframe <code>app/</code> as the Collective app</strong> — it already is one (<code>main.ts</code> = supervisor + board + coordinator persona); docs and structure should say so.</li>
+<li><del><strong>Reframe <code>app/</code> as the Collective app</strong></del> — <strong>done</strong>: READMEs, module headers, and repo docs now name it as such; the board is documented in <code>app/README.md</code>.</li>
 <li><strong>Remote member transport (M2)</strong> — board-owner HTTP API (register/post/claim/route/report) + client side; exactly-once over HTTP; instance auth. Build when a project brain genuinely needs its own store (a second repo, or a second box).</li>
 <li><strong>Governance extension (Society B1–B4)</strong> — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.</li>
 </ol>
