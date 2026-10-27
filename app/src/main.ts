@@ -4,7 +4,7 @@
 import path from "node:path";
 import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
-import { boardExtension, registerMemberInTx } from "./extensions/board.ts";
+import { boardExtension, readBoardDashboard, registerMemberInTx } from "./extensions/board.ts";
 import { ConversationMeta } from "./meta.ts";
 import { defaultModelRef, formatModelRef, loadModelsConfig } from "./model.ts";
 import { ROOT_INSTRUCTIONS } from "./registry.ts";
@@ -25,6 +25,19 @@ async function main() {
     modelsConfig,
     // Product surface: the shared board (Project 0). Consumers of the core don't get it.
     extraExtensions: [boardExtension()],
+    // Product endpoint: the board dashboard. The kernel is board-free; this route
+    // is how the product exposes its own surface on the instance server.
+    routes: [
+      {
+        method: "GET",
+        path: "/board",
+        handle: async (_req, res, rc) => {
+          const dashboard = await readBoardDashboard(rc.harness, rc.ctx);
+          const approvals = await rc.pendingApprovals();
+          rc.json(res, 200, { ...dashboard, pendingApprovals: approvals });
+        },
+      },
+    ],
     rootAgent: { model: defaultRef, thinkingLevel: "medium", instructions: ROOT_INSTRUCTIONS },
     rootInit: async (tx, conversationId) => {
       const d = await tx.doc(ConversationMeta, conversationId);

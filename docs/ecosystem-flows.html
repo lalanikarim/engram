@@ -124,7 +124,7 @@ later.&quot; The board schema is identical in both tiers.</p>
 </tr>
 <tr>
 <td>Route seam in core (apps register their own HTTP routes)</td>
-<td>Small, general kernel addition — moves <code>/board</code> out of <code>server.ts</code>; drydock webhooks benefit too</td>
+<td><strong>Shipped</strong> — <code>createCoreInstance({ routes })</code>; <code>/board</code> now registers from the product layer; drydock webhooks benefit too</td>
 </tr>
 </tbody></table>
 <h3>Invariants that must survive every app</h3>
@@ -1036,7 +1036,7 @@ never shared SQLite.</li>
 </ol>
 <h3>Open work this paradigm implies (in dependency order)</h3>
 <ol>
-<li><strong>Route seam in kernel</strong> — apps register their own HTTP routes; moves <code>/board</code> out of <code>server.ts</code>.</li>
+<li><del><strong>Route seam in kernel</strong></del> — <strong>done</strong>: <code>createCoreInstance({ routes })</code> / <code>ServerDeps.routes</code>; <code>/board</code> now registers from the product layer (<code>main.ts</code>), the kernel is board-free.</li>
 <li><strong>Reframe <code>app/</code> as the Collective app</strong> — it already is one (<code>main.ts</code> = supervisor + board + coordinator persona); docs and structure should say so.</li>
 <li><strong>Remote member transport (M2)</strong> — board-owner HTTP API (register/post/claim/route/report) + client side; exactly-once over HTTP; instance auth. Build when a project brain genuinely needs its own store (a second repo, or a second box).</li>
 <li><strong>Governance extension (Society B1–B4)</strong> — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.</li>

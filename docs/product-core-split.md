@@ -310,6 +310,7 @@ is what makes that loop cheap.
 | `host` / `port` | `string` / `number` | `config.host` / `config.port` | `port: 0` = ephemeral; use `actualPort` for anything derived (e.g. client API URLs) |
 | `rootAgent` | `AgentChange` | catalog default model, thinking `medium` | Persona/instructions/tools for the root conversation |
 | `rootInit` | `(tx, convId) => Promise<void>` | none | Runs **inside** the root-creation commit — durable, exactly-once |
+| `routes` | `readonly AppRoute[]` | `[]` | App-registered HTTP routes (`{ method, path, handle }`), matched by exact method + pathname, tried after core routes before the 404. Handler gets a `RouteContext` (harness, config, durable ctx, `json()`, `pendingApprovals()`). This is how the product serves `GET /board`; consumers can serve their own endpoints (e.g. webhook intake) |
 
 **Returns** `{ harness, server, actualPort, rootConversationId, close }`.
 

@@ -65,6 +65,25 @@ function health(port: number): Promise<number> {
   });
 }
 
+async function httpJson(port: number, method: string, reqPath: string): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: reqPath, method, headers: { authorization: `Bearer ${process.env.API_TOKEN}` } },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          let body: unknown;
+          try { body = JSON.parse(data); } catch { body = data; }
+          resolve({ status: res.statusCode ?? 0, body });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 // Bind a plain server to prove a port was released.
 function bindPlain(port: number): Promise<http.Server> {
   return new Promise((resolve, reject) => {
@@ -92,7 +111,14 @@ async function main() {
   console.log("core instance: seam");
   const a = makeDirs("a");
   const configA = loadConfig({ dataDir: a.dirs.data, workRoot: a.dirs.work, kbDir: a.dirs.kb, configDir: a.dirs.config });
-  const instA = await createCoreInstance({ config: configA, extraExtensions: [probe], port: 0 });
+  // App-registered route seam: the product/consumer layer can add its own endpoints.
+  const probeRoute = {
+    method: "GET",
+    path: "/probe-route",
+    handle: async (_req: http.IncomingMessage, res: http.ServerResponse, rc: { json: (r: http.ServerResponse, s: number, b: unknown) => void }) =>
+      rc.json(res, 200, { ok: true }),
+  };
+  const instA = await createCoreInstance({ config: configA, extraExtensions: [probe], routes: [probeRoute], port: 0 });
   assert(instA.actualPort > 0, "ephemeral port must be allocated");
   check("instance boots with ephemeral port (port: 0)");
 
@@ -112,6 +138,22 @@ async function main() {
   // Board is NOT a core default: it belongs to the product layer (main.ts).
   assert(!toolNames.includes("board_status"), "board tools must not leak into the bare core");
   check("product-only board tools are absent from the bare core");
+
+  // Route seam: app-registered routes are served after core routes…
+  const probed = await httpJson(instA.actualPort, "GET", "/probe-route");
+  assert.strictEqual(probed.status, 200, `probe route should answer 200 (got ${probed.status})`);
+  assert.deepStrictEqual(probed.body, { ok: true }, "probe route body mismatch");
+  check("app-registered route is served on the instance server");
+
+  // …matched by exact method + path; wrong method falls through to 404.
+  const wrongMethod = await httpJson(instA.actualPort, "POST", "/probe-route");
+  assert.strictEqual(wrongMethod.status, 404, `wrong-method probe route should 404 (got ${wrongMethod.status})`);
+  check("route match is exact method + path (wrong method → 404)");
+
+  // The kernel is board-free: /board is a product route, not a core endpoint.
+  const noBoard = await httpJson(instA.actualPort, "GET", "/board");
+  assert.strictEqual(noBoard.status, 404, `bare core must not serve /board (got ${noBoard.status})`);
+  check("kernel is board-free: bare core returns 404 for /board");
 
   assert.strictEqual(await health(instA.actualPort), 200, "/health should answer on actualPort");
   check("HTTP server answers /health on the bound port");
@@ -143,6 +185,11 @@ async function main() {
   const agentB = (await rootB.agent(ctx)).tools.map((t) => t.name);
   assert(!agentB.includes("noop_probe"), "probe tool leaked across instances");
   check("no cross-instance extension leak");
+
+  // Routes are per-instance: B registered none, so A's probe path is a 404 on B.
+  const noRouteB = await httpJson(instB.actualPort, "GET", "/probe-route");
+  assert.strictEqual(noRouteB.status, 404, `instance B must not serve A's route (got ${noRouteB.status})`);
+  check("routes are per-instance (no cross-instance route leak)");
 
   assert.strictEqual(await health(instB.actualPort), 200, "instance B /health");
   assert.strictEqual(await health(instC.actualPort), 200, "instance C /health");
