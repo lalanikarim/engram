@@ -59,6 +59,34 @@ function fmtTime(ts) {
   }
 }
 
+// ---- model picker (GET /models catalog; per-conversation POST/PATCH) ----
+
+function modelRef(m) {
+  return `${m.provider}:${m.id}`;
+}
+
+function shortRef(ref) {
+  const i = String(ref ?? "").indexOf(":");
+  return i >= 0 ? ref.slice(i + 1) : ref;
+}
+
+/** <select> of the model catalog: "" = default, grouped by provider, unavailable disabled. */
+function ModelSelect({ catalog, value, onChange, testId }) {
+  const byProvider = new Map();
+  for (const m of catalog?.models ?? []) {
+    const list = byProvider.get(m.provider) ?? [];
+    list.push(m);
+    byProvider.set(m.provider, list);
+  }
+  return html`<select class="model-select" data-testid=${testId} value=${value ?? ""} onChange=${onChange}>
+    <option value="">default${catalog?.default ? ` (${shortRef(catalog.default)})` : ""}</option>
+    ${[...byProvider.entries()].map(([provider, ms]) => html`
+      <optgroup label=${provider}>
+        ${ms.map((m) => html`<option key=${modelRef(m)} value=${modelRef(m)} disabled=${!m.available}>${m.name === m.id ? m.id : m.name}</option>`)}
+      </optgroup>`)}
+  </select>`;
+}
+
 // ---- entry rendering (full EntryRecords from GET /conversations/:id/entries) ----
 
 function contentTexts(content) {
@@ -95,7 +123,16 @@ function EntryView({ e }) {
 
 // ---- chat view: history + live stream + composer ----
 
-function ChatView({ conv, onConvsChanged }) {
+function ChatView({ conv, catalog, onConvsChanged }) {
+  const switchModel = async (e) => {
+    const v = e.target.value;
+    try {
+      await api(`/conversations/${conv.id}`, { method: "PATCH", body: { model: v === "" ? null : v } });
+      onConvsChanged?.();
+    } catch (err) {
+      console.error("model switch:", err);
+    }
+  };
   const [entries, setEntries] = useState([]);
   const [inRun, setInRun] = useState(false);
   const [input, setInput] = useState("");
@@ -184,6 +221,7 @@ function ChatView({ conv, onConvsChanged }) {
     <div class="chat-head">
       <span class="title">${conv.name}</span>
       ${conv.cwd ? html`<span class="cwd">work/${conv.cwd}</span>` : ""}
+      ${catalog ? html`<${ModelSelect} catalog=${catalog} value=${conv.model ?? ""} onChange=${switchModel} testId="conv-model-select" />` : ""}
       ${inRun ? html`<span class="badge run" data-testid="run-badge">running</span>` : ""}
     </div>
     <div class="messages" data-testid="messages" ref=${scrollRef} onScroll=${(e) => {
@@ -352,8 +390,10 @@ function Shell({ onLogout }) {
   const [activeId, setActiveId] = useState(null);
   const [approvals, setApprovals] = useState([]);
   const [board, setBoard] = useState(null);
+  const [catalog, setCatalog] = useState(null); // { models, default } from GET /models
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
+  const [modelSel, setModelSel] = useState("");
 
   const refreshConvs = useCallback(async () => {
     try {
@@ -398,13 +438,24 @@ function Shell({ onLogout }) {
     return () => clearInterval(t);
   }, [onLogout]);
 
+  useEffect(() => {
+    api("/models").then(setCatalog).catch((err) => {
+      if (err instanceof AuthError) onLogout();
+      else console.error("models:", err);
+    });
+  }, [onLogout]);
+
   const active = convs.find((c) => c.id === activeId) ?? null;
 
   const newConv = async () => {
     try {
-      const body = await api("/conversations", { method: "POST", body: { name: name.trim() || undefined, cwd: cwd.trim() || undefined } });
+      const body = await api("/conversations", {
+        method: "POST",
+        body: { name: name.trim() || undefined, cwd: cwd.trim() || undefined, model: modelSel || undefined },
+      });
       setName("");
       setCwd("");
+      setModelSel("");
       setActiveId(body.id);
       void refreshConvs();
     } catch (err) {
@@ -431,13 +482,14 @@ function Shell({ onLogout }) {
         <input placeholder="Name (optional)" value=${name} onInput=${(e) => setName(e.target.value)} />
         <input placeholder="cwd under work/ (optional)" value=${cwd} onInput=${(e) => setCwd(e.target.value)}
           onKeyDown=${(e) => e.key === "Enter" && newConv()} />
+        ${catalog ? html`<${ModelSelect} catalog=${catalog} value=${modelSel} onChange=${(e) => setModelSel(e.target.value)} testId="new-conv-model" />` : ""}
         <button class="btn" data-testid="new-conv-btn" onClick=${newConv}>New conversation</button>
       </div>
     </aside>
     <main>
       <${ApprovalsBanner} approvals=${approvals} onDecided=${refreshConvs} />
       ${active
-        ? html`<${ChatView} conv=${active} onConvsChanged=${refreshConvs} />`
+        ? html`<${ChatView} conv=${active} catalog=${catalog} onConvsChanged=${refreshConvs} />`
         : html`<div class="empty">Pick a conversation, or start a new one.</div>`}
     </main>
   </div>`;
