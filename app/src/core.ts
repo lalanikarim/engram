@@ -2,9 +2,9 @@
 //
 // createCoreInstance() assembles engram's core: config dirs → model catalog →
 // registry (+ consumer extensions) → harness over SQLite → root conversation →
-// HTTP server. The product layer (src/main.ts) composes board registration, the
-// Telegram client, and shutdown wiring on top of it. Everything else in src/ is
-// internal to the core.
+// HTTP server. The Collective app (src/main.ts) composes the board extension,
+// coordinator registration, its own routes (e.g. GET /board), the Telegram client,
+// and shutdown wiring on top of it. Everything else in src/ is internal to the core.
 //
 // Stability contract: this module is a public surface for consumers that pin
 // engram as a component (e.g. drydock). The instance lifecycle (open/resume/close)

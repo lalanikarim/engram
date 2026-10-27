@@ -1,10 +1,14 @@
-# engram — project-brain agent (MVP)
+# engram — the Collective app (project brain + standing team)
 
-Durable, local-model "project brain" assistant on **pi-durable**: token-auth HTTP/SSE API,
-approval-gated external actions, parallel subagents, per-conversation workspaces,
-config-driven tool extension, a Telegram client (long polling), and sandboxed code execution
-in disposable Podman sidecars. Runs as a single Node container (no build step — Node runs the
+The flagship app on the engram core: a durable, local-model "project brain" assistant on
+**pi-durable** with a **shared board** — a standing team of named members (each with its own
+workspace, model, and domain memory) coordinated by the root conversation. Token-auth HTTP/SSE
+API, approval-gated external actions, parallel subagents, per-conversation workspaces,
+config-driven tool extension, a Telegram client (long polling), and sandboxed code execution in
+disposable Podman sidecars. Runs as a single Node container (no build step — Node runs the
 TypeScript sources natively).
+
+Ecosystem framing (kernel vs. apps, solo/collective/society flows): [`docs/ecosystem-flows.md`](../docs/ecosystem-flows.md).
 
 ## Requirements
 
@@ -56,16 +60,46 @@ engram core as a pinned component instead of forking it: `createCoreInstance()` 
 [`src/core.ts`](src/core.ts) assembles config → model catalog → registry → harness → root
 conversation → HTTP server, and accepts `extraExtensions` (plain pi-durable extension objects,
 installed before `Harness.open`), optional `host`/`port` (`0` = ephemeral, actual port returned),
-and a deterministic idempotent `close()`. `loadConfig(overrides?)` supplies per-instance config.
-`src/main.ts` is the product composition on top (board registration, Telegram client, shutdown
-wiring) — standalone behavior is unchanged. Stability contract: the instance lifecycle and the
-extension injection point are stable across versions; config fields are additive. Note that
-`extraExtensions` run with full core privilege — consequential consumer actions should register
-their own approval-gated tools through the existing gates mechanism. Covered by
-`test/core-instance.test.ts` (seam visibility, teardown/port release, two instances per process).
+`routes` (app-registered HTTP endpoints — how this app serves `GET /board`), and a deterministic
+idempotent `close()`. `loadConfig(overrides?)` supplies per-instance config. `src/main.ts` is the
+Collective-app composition on top (board extension + coordinator registration, `GET /board`
+route, Telegram client, shutdown wiring) — standalone behavior is unchanged. Stability contract:
+the instance lifecycle and the extension/route injection points are stable across versions; options
+and config fields are additive. Note that `extraExtensions` run with full core privilege —
+consequential consumer actions should register their own approval-gated tools through the existing
+gates mechanism. Covered by `test/core-instance.test.ts` (seam visibility, route seam, teardown/port
+release, two instances per process).
 
-Flows and the product-engineer reference live in [`docs/product-core-split.md`](../docs/product-core-split.md)
-(self-contained HTML edition: `product-core-split.html`).
+Flows and the product-engineer reference: [`docs/ecosystem-flows.md`](../docs/ecosystem-flows.md)
+(current; self-contained HTML edition alongside it) — `docs/product-core-split.md` remains the
+PR #43 record for this seam API.
+
+## The board (Collective)
+
+The app composes a **shared board** over the core: the root conversation is the standing
+**coordinator**, and named **members** are persistent specialist conversations, each with its own
+workspace (`work/<name>`), optional model, domain memory (`MEMORY.md` via `remember`/`recall`),
+and tool set. Members coordinate through board docs — jobs (atomic single-winner `claim_job`),
+peer messages (`route_message`, delivered as `<untrusted>` data), channels, and a knowledge base
+with provenance + trust tier. Peer routing is allowlist-gated (`allowedTargets`); members can be
+disabled/enabled centrally and durably (`disable_member`/`enable_member`). The human posts work to
+the coordinator, reads `GET /board` (or Telegram `/board`), and approves — member side effects still
+route through the standard approval gates.
+
+| Tool | Who | Purpose |
+|---|---|---|
+| `create_member` | coordinator/human | register a named member (own conversation + workspace) |
+| `post_job` | coordinator/human | open a job on the board (atomic, indexed) |
+| `claim_job` / `report_status` | members | atomic single-winner claim; done/failed + result |
+| `route_message` | allowlisted members, coordinator, human | peer message, delivered as untrusted data, exactly-once |
+| `board_status` | all members | members + open jobs |
+| `remember` / `recall` | members | durable domain memory across sessions/compaction |
+| `publish_knowledge` / `read_knowledge` | coordinator/human / all | knowledge posts with provenance + trust tier |
+| `disable_member` / `enable_member` | coordinator/human | durable central freeze of a member |
+
+Design: [`docs/plans/collective.md`](../docs/plans/collective.md) (phases A1–A4, all complete);
+board research: [`docs/research/board.md`](../docs/research/board.md). Tests: `test/board.test.ts`
+(deterministic) + the `board-*-live` suites.
 
 ## Web UI
 
@@ -103,6 +137,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | `GET /conversations/:id/entries?after=&limit=` | full transcript entries after a cursor (history rendering, final-answer text) |
 | `POST /conversations/:id/fork` | `{name?}` → fork the conversation at its current head (Telegram forum topics); falls back to a fresh sibling when the parent has no entries |
 | `POST /steer` | `{content, requestId[, conversationId]}` → inject input into a running turn (`whenBusy: "steer"`) |
+| `GET /board` | board dashboard: members, open jobs, channels, knowledge + pending approvals (app-registered route) |
 | `GET /approvals` | pending approval requests discovered from transcript markers |
 | `POST /approvals/:key` | `{decision: "approved" \| "denied"}` → durable decision (409 if already decided — idempotent under double-tap races) |
 
@@ -112,7 +147,7 @@ Enabled when `TELEGRAM_BOT_TOKEN` is set. Long polling only — outbound connect
 no inbound ports. The bound chat maps to the root conversation; forum topics map to forks
 of it (created on first use, named after the topic). Progress streams as a single edited
 message per run; gated actions get inline Approve/Deny buttons (settled after the decision);
-`approve <key>` / `deny <key>` works as a text fallback. Chat bindings and the polling offset
+`approve <key>` / `deny <key>` works as a text fallback; `/board` renders the board dashboard. Chat bindings and the polling offset
 persist in `data/telegram-state.json`, so restarts rebind without replaying updates
 (`requestId = tg-<update_id>` keeps redelivered updates exactly-once).
 

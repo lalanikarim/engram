@@ -320,6 +320,6 @@ every bump.
 ### Open work this paradigm implies (in dependency order)
 
 1. ~~**Route seam in kernel**~~ — **done**: `createCoreInstance({ routes })` / `ServerDeps.routes`; `/board` now registers from the product layer (`main.ts`), the kernel is board-free.
-2. **Reframe `app/` as the Collective app** — it already is one (`main.ts` = supervisor + board + coordinator persona); docs and structure should say so.
+2. ~~**Reframe `app/` as the Collective app**~~ — **done**: READMEs, module headers, and repo docs now name it as such; the board is documented in `app/README.md`.
 3. **Remote member transport (M2)** — board-owner HTTP API (register/post/claim/route/report) + client side; exactly-once over HTTP; instance auth. Build when a project brain genuinely needs its own store (a second repo, or a second box).
 4. **Governance extension (Society B1–B4)** — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.

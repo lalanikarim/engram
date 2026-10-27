@@ -1,6 +1,7 @@
-// Product composition (engram the app): core instance + board + Telegram + shutdown wiring.
-// The composable core lives in src/core.ts (issue #42); this file is what makes the
-// standalone engram product — its CLI/env behavior is unchanged by that split.
+// The Collective app: the flagship composition of the engram core — board extension +
+// coordinator registration, the GET /board route, Telegram client, and shutdown wiring.
+// The composable core lives in src/core.ts (issue #42); ecosystem framing (kernel vs. apps,
+// solo/collective/society flows) is in docs/ecosystem-flows.md.
 import path from "node:path";
 import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
