@@ -84,6 +84,12 @@ export interface ServerDeps {
   modelsConfig: ModelsConfig;
   /** App-registered routes, tried after the core routes (product/consumer endpoints). */
   routes?: readonly AppRoute[];
+  /**
+   * Additional bearer tokens accepted by the auth gate (M2.2: this instance's peer tokens,
+   * so remote members can reach the board RPC routes). They still only unlock what the
+   * app-registered peer routes expose — identity is re-resolved per route.
+   */
+  extraTokens?: () => readonly string[];
 }
 
 /** Context handed to app-registered routes (see {@link AppRoute}). */
@@ -232,12 +238,17 @@ async function estimateTranscriptTokens(conv: Conversation): Promise<number> {
   return Math.ceil(chars / 4);
 }
 
-function authorized(req: http.IncomingMessage, token: string): boolean {
+function authorized(req: http.IncomingMessage, tokens: readonly string[]): boolean {
   const header = req.headers["authorization"] ?? "";
-  const expected = `Bearer ${token}`;
-  const a = Buffer.from(header);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (!header.startsWith("Bearer ")) return false;
+  const presented = Buffer.from(header.slice(7));
+  let ok = false;
+  for (const token of tokens) {
+    const expected = Buffer.from(`Bearer ${token}`);
+    // Compare every candidate so the timing does not reveal which token matched.
+    if (presented.length === expected.length && timingSafeEqual(presented, expected.slice(7))) ok = true;
+  }
+  return ok;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -338,7 +349,7 @@ export function createServer(deps: ServerDeps): http.Server {
           return;
         }
       }
-      if (!authorized(req, config.token)) {
+      if (!authorized(req, [config.token, ...(deps.extraTokens?.() ?? [])])) {
         sendJson(res, 401, { error: "unauthorized" });
         return;
       }

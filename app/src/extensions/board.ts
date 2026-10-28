@@ -389,6 +389,14 @@ export async function resolveRouteInTx(tx: Tx, target: string): Promise<RouteTar
   return null;
 }
 
+/**
+ * M2.2 job visibility for a remote member: it sees open jobs nobody has claimed
+ * (the claimable pool) plus its own claimed jobs — never other members' work.
+ */
+export function visibleJobsFor(jobs: readonly Job[], meId: string): Job[] {
+  return jobs.filter((j) => (j.status === "open" && j.assignee === null) || (j.status === "claimed" && j.assignee === meId));
+}
+
 // ---- M2 remote member transport (outbound dispatch) -------------------------
 
 /** Parse BOARD_PEER_TOKENS ("name:token,name2:token2") into a lookup. Malformed parts are skipped. */
