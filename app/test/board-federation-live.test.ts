@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { api, Stream } from "./helpers.ts";
+import { api, killPortSquatter, Stream } from "./helpers.ts";
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = path.resolve(APP_ROOT, "..");
@@ -120,27 +120,6 @@ function spawnInstance(name: string, dirs: { data: string; work: string; kb: str
   return { proc, monitor };
 }
 
-// Preflight: kill any process LISTENING on our ports (orphans from earlier aborted runs crash
-// our respawns with EADDRINUSE). LISTEN-only match + own-PID guard so we never touch the test
-// runner's client connections or unrelated processes.
-function killPortSquatter(port: number) {
-  let pids: string[] = [];
-  try {
-    pids = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n").filter(Boolean);
-  } catch {
-    return; // nothing listening → port is free
-  }
-  for (const pidStr of pids) {
-    const pid = Number(pidStr);
-    if (pid === process.pid) continue;
-    console.log(`[preflight] killing LISTEN squatter pid ${pid} on port ${port}`);
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // already gone
-    }
-  }
-}
 killPortSquatter(PORT_A);
 killPortSquatter(PORT_B);
 
@@ -317,12 +296,14 @@ check("member conversation created on B", created.status === 201 && typeof creat
 if (created.status !== 201) process.exit(1);
 const remoteConvId = created.json.id as number;
 
+// A2 routing is allowlist-gated: grant peer-b the right to route back to the coordinator.
 const reg = await api(PORT_A, TOKEN_A, "POST", "/board/members", {
   id: "peer-b",
   name: "Peer B",
   endpoint: `http://127.0.0.1:${PORT_B}`,
   tokenRef: "peer-b",
   conversationId: remoteConvId,
+  allowedTargets: ["coordinator"],
 });
 check("remote member registered on A", reg.status === 201 && reg.json?.id === "peer-b", JSON.stringify(reg.json));
 
@@ -333,7 +314,7 @@ check("jobs posted on A", (await post("job-1", "first job")).status === 201 && (
 const visB = await fetch(`http://127.0.0.1:${PORT_A}/board/jobs`, { headers: { authorization: `Bearer ${TOKEN_B}` } }).then(async (r) => ({ status: r.status, json: (await r.json().catch(() => null)) as any }));
 check("peer sees both open jobs", visB.status === 200 && (visB.json?.jobs ?? []).every((j: any) => j.id === "job-1" || j.id === "job-2") && (visB.json?.jobs ?? []).length === 2, JSON.stringify(visB.json));
 
-check("unknown bearer → 401", (await api(PORT_A, TOKEN_B, "GET", "/board/jobs")).status === 401);
+check("unknown bearer → 401", (await api(PORT_A, "tok-rogue", "GET", "/board/jobs")).status === 401);
 check("no bearer → 401", (await fetch(`http://127.0.0.1:${PORT_A}/board/jobs`).then((r) => r.status)) === 401);
 
 // ---- deterministic: atomic claim over HTTP + report authorization ----
@@ -372,7 +353,9 @@ for (let i = 0; i < 30 && !sawRouteBack; i++) {
 }
 check("coordinator transcript contains the peer's untrusted-wrapped message", sawRouteBack);
 
-check("peer cannot route to a barred target", (await api(PORT_A, TOKEN_B, "POST", "/board/route", { to: "no-such-member", content: "x" })).status === 404);
+// Auth is checked before resolution (same order as the local route_message tool): a barred
+// target answers 403 even when it does not exist.
+check("peer cannot route to a barred target", (await api(PORT_A, TOKEN_B, "POST", "/board/route", { to: "no-such-member", content: "x" })).status === 403);
 
 // ---- model step: B's brain uses the board-client tools (claim + report job-2) ----
 const streamB = new Stream(PORT_B, TOKEN_B, 1); // B's root conversation hosts the client tools

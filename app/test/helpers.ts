@@ -1,4 +1,31 @@
-// Shared helpers for the board live suites: an API client and an SSE stream reader.
+// Shared helpers for the board live suites: an API client, an SSE stream reader, and
+// port hygiene for spawned instances.
+import { execSync } from "node:child_process";
+
+/**
+ * Kill any process LISTENING on the given port (orphans from earlier aborted runs crash our
+ * respawns with EADDRINUSE). LISTEN-only match + own-PID guard so we never touch the test
+ * runner's client connections or unrelated processes.
+ */
+export function killPortSquatter(port: number): void {
+  let pids: string[] = [];
+  try {
+    pids = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split("\n").filter(Boolean);
+  } catch {
+    return; // nothing listening → port is free
+  }
+  for (const pidStr of pids) {
+    const pid = Number(pidStr);
+    if (pid === process.pid) continue;
+    console.log(`[preflight] killing LISTEN squatter pid ${pid} on port ${port}`);
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
+}
+
 export async function api(port: number, token: string, method: string, pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
   const res = await fetch(`http://127.0.0.1:${port}${pathname}`, {
     method,

@@ -7,6 +7,7 @@ import { loadDotEnv } from "./dotenv.ts";
 import { loadConfig } from "./config.ts";
 import {
   boardExtension,
+  canPostJobInTx,
   canRouteInTx,
   claimJobInTx,
   dispatchRemoteMessage,
@@ -36,19 +37,23 @@ import { TelegramClient } from "./telegram.ts";
 
 // ---- M2.2 board RPC routes (peer-authenticated) -----------------------------
 
-/** Resolve the caller's member id from its bearer token (a value in BOARD_PEER_TOKENS). */
-function peerIdentity(req: import("node:http").IncomingMessage): string | null {
+/**
+ * Resolve the caller's board identity from its bearer token: the owner's API token acts as the
+ * coordinator; any value in BOARD_PEER_TOKENS is that peer's member id; anything else is unknown.
+ */
+function peerIdentity(req: import("node:http").IncomingMessage, ownerToken: string): string | null {
   const header = req.headers["authorization"] ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return null;
+  if (token === ownerToken) return "coordinator";
   for (const [name, value] of parsePeerTokens(process.env)) if (value === token) return name;
   return null;
 }
 
 /** The board-owner's RPC surface: job visibility/claim/report + route-back for remote members. */
-function peerBoardRoutes(): Array<import("./server.ts").AppRoute> {
+function peerBoardRoutes(ownerToken: string): Array<import("./server.ts").AppRoute> {
   const guard = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse, rc: import("./server.ts").RouteContext): string | null => {
-    const id = peerIdentity(req);
+    const id = peerIdentity(req, ownerToken);
     if (!id) rc.json(res, 401, { error: "unauthorized — bearer token is not a known peer" });
     return id;
   };
@@ -78,6 +83,12 @@ function peerBoardRoutes(): Array<import("./server.ts").AppRoute> {
           rc.json(res, 409, { error: `job "${id}" already exists` });
           return;
         }
+        // A2: only the coordinator/human may post new work — members don't self-initiate.
+        const mayPost = await rc.harness.commit((tx) => canPostJobInTx(tx, me), rc.ctx);
+        if (!mayPost) {
+          rc.json(res, 403, { error: `member "${me}" cannot post jobs (coordinator/human only)` });
+          return;
+        }
         const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload) ? (body.payload as JsonObject) : {};
         await rc.harness.commit(
           (tx) => postJobInTx(tx, { id, title, requester: me, assignee: null, payload, status: "open", claimedBy: null, result: null }),
@@ -93,7 +104,8 @@ function peerBoardRoutes(): Array<import("./server.ts").AppRoute> {
         const me = guard(req, res, rc);
         if (!me) return;
         const status = await rc.harness.commit((tx) => readBoardStatusInTx(tx), rc.ctx);
-        rc.json(res, 200, { jobs: visibleJobsFor(status.openJobs, me) });
+        // Claimable pool (open, unassigned) + the caller's own claimed jobs.
+        rc.json(res, 200, { jobs: visibleJobsFor([...status.openJobs, ...status.claimedJobs], me) });
       },
     },
     {
@@ -127,10 +139,13 @@ function peerBoardRoutes(): Array<import("./server.ts").AppRoute> {
     {
       method: "POST",
       path: "/board/jobs/:id/status",
+      pattern: /^\/board\/jobs\/[^/]+\/status$/,
       handle: async (req, res, rc) => {
         const me = guard(req, res, rc);
         if (!me) return;
-        const jobId = decodeURIComponent((req.url ?? "").split("/").pop() ?? "");
+        // /board/jobs/:id/status → the job id is the second-to-last path segment.
+        const segments = (req.url ?? "").split("?")[0].split("/").filter(Boolean);
+        const jobId = decodeURIComponent(segments[segments.length - 2] ?? "");
         let body: Record<string, unknown>;
         try {
           body = await readJsonBody(req);
@@ -311,9 +326,10 @@ async function main() {
           rc.json(res, 201, { id, endpoint });
         },
       },
-      // ---- M2.2 board RPC API — peer-authenticated (the caller's bearer token must be a
-      // value in this instance's BOARD_PEER_TOKENS; the name is its member id) ----
-      ...peerBoardRoutes(),
+      // ---- M2.2 board RPC API — peer-authenticated (the caller's bearer token must be the
+      // owner token or a value in this instance's BOARD_PEER_TOKENS; the name is its member id)
+      // ----
+      ...peerBoardRoutes(config.token),
     ],
     // M2.2: peer tokens pass the auth gate so remote members can reach the board RPC routes
     // (identity is re-resolved per route from the token; they unlock nothing else).

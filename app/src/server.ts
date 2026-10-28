@@ -109,10 +109,15 @@ export interface RouteContext {
  * Matched by exact method + pathname and tried after the core routes, before the
  * 404 fallback. The kernel knows nothing about what apps serve; this is how e.g.
  * the product's GET /board or a consumer's webhook intake reach the instance server.
+ *
+ * `pattern` (optional) replaces exact path matching with a regex tested against the pathname,
+ * for parameterized routes such as `/board/jobs/:id/status`. When present it wins over
+ * `path`, which still documents the route shape.
  */
 export interface AppRoute {
   method: string;
   path: string;
+  pattern?: RegExp;
   handle: (req: http.IncomingMessage, res: http.ServerResponse, routeCtx: RouteContext) => Promise<void>;
 }
 
@@ -244,16 +249,19 @@ function authorized(req: http.IncomingMessage, tokens: readonly string[]): boole
   const presented = Buffer.from(header.slice(7));
   let ok = false;
   for (const token of tokens) {
-    const expected = Buffer.from(`Bearer ${token}`);
+    const expected = Buffer.from(token);
     // Compare every candidate so the timing does not reveal which token matched.
-    if (presented.length === expected.length && timingSafeEqual(presented, expected.slice(7))) ok = true;
+    if (presented.length === expected.length && timingSafeEqual(presented, expected)) ok = true;
   }
   return ok;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  // Serialize BEFORE writeHead: a stringify failure after headers are sent would leave the
+  // client hanging on a body that never arrives (the outer catch can no longer answer).
+  const payload = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
+  res.end(payload);
 }
 
 /** Read a JSON request body (bounded). Exported for app-registered routes. */
@@ -761,7 +769,8 @@ export function createServer(deps: ServerDeps): http.Server {
 
       // App-registered routes (product/consumer endpoints) — after core routes, before 404.
       for (const route of routes ?? []) {
-        if (route.method === req.method && route.path === pathname) {
+        const matches = route.method === req.method && (route.pattern ? route.pattern.test(pathname) : route.path === pathname);
+        if (matches) {
           await route.handle(req, res, routeCtx);
           return;
         }

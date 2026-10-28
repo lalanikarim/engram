@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { api, Stream } from "./helpers.ts";
+import { api, killPortSquatter, Stream } from "./helpers.ts";
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = path.resolve(APP_ROOT, "..");
@@ -107,6 +107,9 @@ function spawnInstance(name: string, dirs: { data: string; work: string; kb: str
 
 const dirsA = dirsFor("a");
 const dirsB = dirsFor("b");
+// Preflight: clear orphaned listeners from earlier aborted runs (EADDRINUSE on spawn).
+killPortSquatter(PORT_A);
+killPortSquatter(PORT_B);
 // B first (A needs B's URL + token to exist conceptually, though startup order doesn't matter).
 const procB = spawnInstance("b", dirsB, PORT_B, TOKEN_B);
 const procA = spawnInstance("a", dirsA, PORT_A, TOKEN_A, { BOARD_PEER_TOKENS: `peer-b:${TOKEN_B}` });
