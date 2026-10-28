@@ -56,12 +56,24 @@ export interface CoreInstanceOptions {
   extraTokens?: () => readonly string[];
 }
 
+/** Minimal stable sandbox surface exposed on CoreInstance (issue #44). */
+export interface SandboxSupervision {
+  /** Per-conversation container info; null when the conversation has no live sandbox. */
+  lookup(conversationId: ConversationId): { containerId: string; workspace: string; image: string } | null;
+  /** Tear down every live sandbox (idempotent). */
+  disposeAll(context: Context): Promise<void>;
+  /** Remove orphaned containers left by a crashed previous run. */
+  sweepOrphans(context: Context): Promise<string[]>;
+}
+
 export interface CoreInstance {
   harness: Harness;
   server: http.Server;
   /** The port actually bound (differs from the requested one when port is 0). */
   actualPort: number;
   rootConversationId: number;
+  /** Sandbox supervision surface for consumers (issue #44): lookup + teardown only. */
+  sandbox: SandboxSupervision;
   /** Deterministic, idempotent teardown: server, sandbox containers, harness. */
   close: () => Promise<void>;
 }
@@ -156,7 +168,18 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
     }
   };
 
-  return { harness, server, actualPort, rootConversationId: root.id, close };
+  return {
+    harness,
+    server,
+    actualPort,
+    rootConversationId: root.id,
+    sandbox: {
+      lookup: (id) => sandbox.lookup(id),
+      disposeAll: (c) => sandbox.disposeAll(c),
+      sweepOrphans: (c) => sandbox.sweepOrphans(c),
+    },
+    close,
+  };
 }
 
 // ---- Public surface for apps that compose the kernel (issue #42) -----------------

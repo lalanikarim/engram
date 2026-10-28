@@ -855,6 +855,37 @@ wiring, and all 10 board suites moved to **[lalanikarim/collective](https://gith
   endpoint load spike (post-mortem store showed ~2 min/model turn vs the suite's 180 s run
   timeout); same suite was 91/91 earlier the same day under normal load.
 
+### Destructive guard: command matching + containment-gated floor ✅ COMPLETE (2026-10-28, `feature/gates-cmd-matching-sandbox-seam`, issues #53 + #44)
+
+Two drydock-reported kernel gaps closed in one branch:
+
+- **Issue #53 — match commands, not substrings.** The destructive floor used to regex the raw
+  command line, so `npm ci >/dev/null 2>&1`, `grep -rn 'shutdown' src/`, and SQL text inside a
+  string literal all blocked unattended consumers. Now bash lines are reduced to simple-command
+  candidates before matching: split on `&&`/`||`/`|`/`;`/`&`/newlines (quote-aware), `/dev/*`
+  redirections dropped (discarding output is not a write), quoted string literals masked —
+  except when the head is a shell interpreter or `eval`, where quoted text is live code and is
+  tested as its own candidate. `reboot`/`shutdown` count only as the command being run (head
+  position, after env assignments/`sudo`), never as a mentioned word. Non-bash tools keep
+  conservative canonical-JSON matching. The issue's full acceptance list is now the test suite
+  (`gates.test.ts`, 45 checks).
+- **Issue #53 — make the floor declarable (containment-gated).** A tier may declare
+  `"containment": "sandbox"`: when that conversation runs sandboxed
+  (`ConversationMeta.sandbox === true`), the tool is ungated there — the sealed container is the
+  protection. Declarable and loud: `compileGates` warns at startup listing every containment-declared
+  tool, each suppression logs once per conversation/tool. **Uncontained conversations keep the
+  absolute floor** — "destructive can never be auto-approved or allow-ruled" survives wherever
+  there is no declared containment. Free-form pattern exclusion was deliberately not added:
+  tokenization removes the false positives it existed for, and a pattern-level opt-out could
+  carve holes in the floor on uncontained instances.
+- **Issue #44 — sandbox supervision surface.** `CoreInstance.sandbox` now exposes the minimal
+  stable surface: `lookup(conversationId)` → `{ containerId, workspace, image } | null`, plus
+  idempotent `disposeAll(context)` and `sweepOrphans(context)`. Consumers (drydock Phase 1) can
+  build liveness supervision on top without reaching into internals.
+- Verification: tsc clean; deterministic suites all green (gates 45/45 incl. the #53 acceptance
+  list, model-catalog 26, approval-rules 18, config, sandbox-containment 5); live: core-instance
+  17/17 (incl. 2 new seam checks), `api` **91/91**.
+
 ### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
 
 The last missing piece of the model-catalog product surface: pick a model when creating a

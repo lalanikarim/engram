@@ -158,6 +158,15 @@ async function main() {
   assert.strictEqual(await health(instA.actualPort), 200, "/health should answer on actualPort");
   check("HTTP server answers /health on the bound port");
 
+  // Sandbox supervision surface (issue #44): lookup + teardown only, stable for consumers.
+  assert.strictEqual(typeof instA.sandbox.lookup, "function", "sandbox.lookup missing on CoreInstance");
+  assert.strictEqual(typeof instA.sandbox.disposeAll, "function", "sandbox.disposeAll missing on CoreInstance");
+  assert.strictEqual(typeof instA.sandbox.sweepOrphans, "function", "sandbox.sweepOrphans missing on CoreInstance");
+  check("core instance exposes the sandbox supervision surface (issue #44)");
+  // No live sandbox for a conversation that was never flagged sandboxed.
+  assert.strictEqual(instA.sandbox.lookup(instA.rootConversationId as ConversationId), null, "lookup must be null without a live sandbox");
+  check("sandbox lookup is null for a non-sandboxed conversation");
+
   // ---- 2. Teardown: close() is idempotent and releases the port ----
   console.log("core instance: teardown");
   await instA.close();

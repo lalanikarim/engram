@@ -2,9 +2,12 @@
 // Run with: node test/gates.test.ts
 import {
   DEFAULT_DESTRUCTIVE_PATTERNS,
+  applyContainment,
   compileGates,
+  destructiveCandidates,
   evaluateGate,
   gateArgText,
+  headCommand,
   renderAction,
 } from "../src/extensions/gates.ts";
 
@@ -75,6 +78,103 @@ try {
   badTier = /unknown default tier/.test(String(e));
 }
 check("unknown tier rejected at load", badTier);
+
+console.log("issue #53: destructive matching on simple commands, not substrings");
+// The minimal policy a sandboxed consumer writes — gate only the consequential tool; bash is NOT gated.
+const minimal = compileGates({ tiers: [{ tool: "merge_pr" }] });
+check("node --test → null", evaluateGate(minimal, "bash", { command: "node --test" }) === null);
+check(
+  "git add && commit → null",
+  evaluateGate(minimal, "bash", { command: "git add src/x.mjs && git commit -m fix" }) === null,
+);
+check(
+  "npm ci >/dev/null 2>&1 → null (discarding output is not a write)",
+  evaluateGate(minimal, "bash", { command: "npm ci >/dev/null 2>&1" }) === null,
+);
+check(
+  "cd /sandbox && npm test 2>/dev/null → null",
+  evaluateGate(minimal, "bash", { command: "cd /sandbox && npm test 2>/dev/null" }) === null,
+);
+check(
+  "grep -rn 'shutdown' src/ → null (quoted search text)",
+  evaluateGate(minimal, "bash", { command: "grep -rn 'shutdown' src/" }) === null,
+);
+check(
+  "cat ... | grep reboot → null (a mentioned word is not a command)",
+  evaluateGate(minimal, "bash", { command: "cat src/server.mjs | grep reboot" }) === null,
+);
+check(
+  "node -e with SQL in a string → null",
+  evaluateGate(minimal, "bash", { command: `node -e "console.log('DROP TABLE x')"` }) === null,
+);
+check(
+  "printf writing a script → null (writing ≠ running)",
+  evaluateGate(minimal, "bash", { command: "printf '%s\\n' '#!/bin/sh' 'rm -rf /tmp/build' > clean.sh" }) === null,
+);
+
+console.log("issue #53: real destructive commands still caught");
+check("rm -rf /var → destructive", evaluateGate(minimal, "bash", { command: "rm -rf /var" }) === "destructive");
+check(
+  "git push --force → destructive",
+  evaluateGate(minimal, "bash", { command: "git push --force origin main" }) === "destructive",
+);
+check(
+  "git reset --hard → destructive",
+  evaluateGate(minimal, "bash", { command: "git reset --hard HEAD~1" }) === "destructive",
+);
+check("mkfs.ext4 /dev/sda1 → destructive", evaluateGate(minimal, "bash", { command: "mkfs.ext4 /dev/sda1" }) === "destructive");
+check(
+  "dd if= → destructive",
+  evaluateGate(minimal, "bash", { command: "dd if=/dev/zero of=/tmp/x" }) === "destructive",
+);
+check("fork bomb → destructive", evaluateGate(minimal, "bash", { command: ":(){ :|:& };:" }) === "destructive");
+check(
+  "reboot as the command (sudo) → destructive",
+  evaluateGate(minimal, "bash", { command: "sudo reboot" }) === "destructive",
+);
+check(
+  "rm -rf inside a chain → destructive",
+  evaluateGate(minimal, "bash", { command: "npm ci && rm -rf /var" }) === "destructive",
+);
+check(
+  "git push --force after || → destructive",
+  evaluateGate(minimal, "bash", { command: "true || git push --force origin main" }) === "destructive",
+);
+check(
+  "bash -c with live rm → destructive (interpreter quotes stay live)",
+  evaluateGate(minimal, "bash", { command: 'bash -c "rm -rf /var"' }) === "destructive",
+);
+
+console.log("issue #53: containment-gated floor suppression");
+const contained = compileGates({ tiers: [{ tool: "merge_pr" }, { tool: "bash", containment: "sandbox" }] });
+check(
+  "containment + sandboxed → ungated (even from the destructive tier)",
+  applyContainment(contained, "bash", "destructive", true) === null,
+);
+check(
+  "containment + not sandboxed → floor kept",
+  applyContainment(contained, "bash", "destructive", false) === "destructive",
+);
+check(
+  "no containment declaration → unchanged even when sandboxed",
+  applyContainment(minimal, "bash", "destructive", true) === "destructive",
+);
+check("containment also suppresses the declared tier", applyContainment(contained, "bash", "prompt", true) === null);
+let badContainment = false;
+try {
+  compileGates({ tiers: [{ tool: "x", containment: "host" as never }] });
+} catch (e) {
+  badContainment = /unknown containment/.test(String(e));
+}
+check("unknown containment rejected at load", badContainment);
+
+console.log("issue #53: candidate reduction units");
+check(
+  "redirections to /dev/* are dropped",
+  destructiveCandidates("npm ci >/dev/null 2>&1").every((c) => !c.includes("/dev/")),
+);
+check("headCommand skips env assignments and sudo", headCommand("FOO=bar sudo rm -rf /") === "rm");
+check("headCommand basenames paths", headCommand("/bin/bash -c x") === "bash");
 
 console.log("arg rendering");
 check(

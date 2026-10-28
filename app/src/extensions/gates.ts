@@ -15,6 +15,13 @@ export type GateSpec = {
   autoPatterns?: string[];
   /** Tier when no auto pattern matches. Only "prompt" in phase 1. */
   default?: "prompt";
+  /**
+   * Containment declaration (issue #53): when this conversation runs sandboxed
+   * (ConversationMeta.sandbox === true), the tool is ungated — neither the destructive
+   * floor nor the declared tier applies, because the sealed container is the protection.
+   * Uncontained conversations keep the full gate. Only "sandbox" in phase 1.
+   */
+  containment?: "sandbox";
 };
 
 /**
@@ -51,10 +58,17 @@ export const DEFAULT_DESTRUCTIVE_PATTERNS: string[] = [
   "\\bgit\\s+reset\\s+--hard\\b",
   "\\bDROP\\s+(TABLE|DATABASE|INDEX)\\b",
   "\\bTRUNCATE\\s+\\w+",
-  ">\\s*/dev/",
-  "\\bshutdown\\b",
-  "\\breboot\\b",
+  ">\\s*/dev/", // still guards non-bash tools (bash candidates drop /dev/* redirections first)
 ];
+
+/**
+ * Words that are destructive only when they ARE the command being run, never when merely
+ * mentioned as an argument or in text (issue #53): `grep reboot src/` must not block.
+ */
+const WEAK_WORD_COMMANDS = new Set(["reboot", "shutdown"]);
+
+/** Heads whose quoted arguments are live shell code, not data. */
+const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "eval"]);
 
 export type GateTier = "destructive" | "prompt" | "auto";
 
@@ -67,8 +81,8 @@ export type CompiledClassifier = {
 };
 
 export type CompiledGates = {
-  /** tool → auto patterns + default tier; absent = ungated. */
-  tiers: Map<string, { auto: RegExp[]; def: GateTier }>;
+  /** tool → auto patterns + default tier (+ optional containment declaration); absent = ungated. */
+  tiers: Map<string, { auto: RegExp[]; def: GateTier; containment?: "sandbox" }>;
   destructive: RegExp[];
   classifier: CompiledClassifier;
 };
@@ -94,16 +108,29 @@ function canonicalizeJson(value: unknown): unknown {
 }
 
 export function compileGates(config: GatesConfig | null): CompiledGates {
-  const tiers = new Map<string, { auto: RegExp[]; def: GateTier }>();
+  const tiers = new Map<string, { auto: RegExp[]; def: GateTier; containment?: "sandbox" }>();
   for (const spec of config?.tiers ?? []) {
     if (!spec.tool) throw new Error("gates.json: every tier needs a tool name");
     if (spec.default !== undefined && spec.default !== "prompt") {
       throw new Error(`gates.json: tool "${spec.tool}" has unknown default tier "${String(spec.default)}"`);
     }
+    if (spec.containment !== undefined && spec.containment !== "sandbox") {
+      throw new Error(`gates.json: tool "${spec.tool}" has unknown containment "${String(spec.containment)}"`);
+    }
     tiers.set(spec.tool, {
       auto: (spec.autoPatterns ?? []).map((p) => compilePattern(p, spec.tool)),
       def: spec.default ?? "prompt",
+      containment: spec.containment,
     });
+  }
+  // Loud at startup: containment-gated suppression weakens the floor for sandboxed
+  // conversations and must never be enabled by accident (issue #53).
+  const contained = [...tiers.entries()].filter(([, s]) => s.containment === "sandbox").map(([t]) => t);
+  if (contained.length > 0) {
+    console.warn(
+      `[gates] containment-gated floor suppression declared for: ${contained.join(", ")} — ` +
+        "the destructive tier and declared tier are skipped when a conversation runs sandboxed",
+    );
   }
   const destructive = [...DEFAULT_DESTRUCTIVE_PATTERNS, ...(config?.destructivePatterns ?? [])].map((p) =>
     compilePattern(p, "<destructive>"),
@@ -137,10 +164,176 @@ function compilePattern(pattern: string, where: string): RegExp {
   }
 }
 
+/**
+ * Reduce a bash command line to the simple-command texts destructive patterns match against
+ * (issue #53): split on shell operators and newlines, drop /dev/* redirections (discarding
+ * output is not a write), and mask quoted string literals — except when the simple command's
+ * head is a shell interpreter or eval, where quoted text is live code and is also tested as
+ * its own candidate. Backticks and $(...) are never masked: they execute.
+ */
+export function destructiveCandidates(command: string): string[] {
+  const out: string[] = [];
+  for (const segment of splitSimpleCommands(command)) {
+    const cleaned = segment.replace(/\d*\s*>>?\s*\/dev\/\S*/g, " ");
+    const head = headCommand(cleaned);
+    if (head !== null && SHELL_INTERPRETERS.has(head)) {
+      out.push(cleaned);
+      for (const quoted of quotedSpans(cleaned)) out.push(quoted); // live code: test the contents too
+    } else {
+      out.push(maskQuotes(cleaned));
+    }
+  }
+  return out;
+}
+
+/** The effective command word of a simple command: first token after leading VAR=val assignments and an optional sudo, basename'd. */
+export function headCommand(command: string): string | null {
+  const tokens = command.trim().split(/\s+/);
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_]\w*=\S*$/.test(tokens[i] ?? "")) i++; // VAR=val assignments
+  if (tokens[i] === "sudo") i++;
+  const word = tokens[i];
+  if (!word) return null;
+  return word.replace(/^.*\//, "");
+}
+
+/** Split a bash line into simple commands on &&, ||, |, ;, & and newlines — quote-aware. */
+function splitSimpleCommands(command: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (inSingle) {
+      current += ch;
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      current += ch;
+      if (ch === "\\") escaped = true;
+      else if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      current += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "&" || ch === "|" || ch === ";" || ch === "\n") {
+      segments.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  segments.push(current);
+  return segments.map((s) => s.trim()).filter(Boolean);
+}
+
+/** Contents of single/double-quoted spans (double-quote escapes honored). */
+function quotedSpans(text: string): string[] {
+  const spans: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch !== "'" && ch !== '"') {
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    let content = "";
+    while (j < text.length) {
+      if (ch === '"' && text[j] === "\\" && j + 1 < text.length) {
+        content += text[j + 1];
+        j += 2;
+        continue;
+      }
+      if (text[j] === ch) break;
+      content += text[j];
+      j++;
+    }
+    spans.push(content);
+    i = j + 1;
+  }
+  return spans;
+}
+
+/** The command with all quoted spans removed — data positions can't perform actions. */
+function maskQuotes(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"') {
+      let j = i + 1;
+      while (j < text.length) {
+        if (ch === '"' && text[j] === "\\" && j + 1 < text.length) {
+          j += 2;
+          continue;
+        }
+        if (text[j] === ch) break;
+        j++;
+      }
+      i = j + 1;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Destructive check (issue #53): patterns match simple-command candidates for bash, raw text
+ * otherwise; reboot/shutdown count only as the command being run, never as a mentioned word.
+ */
+function isDestructive(gates: CompiledGates, tool: string, text: string): boolean {
+  const candidates = tool === "bash" ? destructiveCandidates(text) : [text];
+  if (gates.destructive.some((p) => candidates.some((c) => p.test(c)))) return true;
+  return candidates.some((c) => {
+    const head = headCommand(c);
+    return head !== null && WEAK_WORD_COMMANDS.has(head);
+  });
+}
+
+/**
+ * Containment-gated floor suppression (issue #53): a tool whose tier declares
+ * containment:"sandbox" is ungated when the conversation runs sandboxed — the sealed
+ * container is the protection. Pure so it is unit-testable; the hook supplies the meta.
+ */
+export function applyContainment(
+  gates: CompiledGates,
+  tool: string,
+  tier: GateTier | null,
+  sandboxed: boolean,
+): GateTier | null {
+  if (tier === null || !sandboxed) return tier;
+  if (gates.tiers.get(tool)?.containment !== "sandbox") return tier;
+  return null;
+}
+
 /** First match wins: destructive > auto pattern > tool default. null = ungated. */
 export function evaluateGate(gates: CompiledGates, tool: string, args: unknown): GateTier | null {
   const text = gateArgText(tool, args);
-  if (gates.destructive.some((p) => p.test(text))) return "destructive";
+  if (isDestructive(gates, tool, text)) return "destructive";
   const spec = gates.tiers.get(tool);
   if (!spec) return null;
   if (spec.auto.some((p) => p.test(text))) return "auto";
