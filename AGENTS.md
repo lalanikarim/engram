@@ -6,10 +6,11 @@ A durable, local-model "project brain" agent on **pi-durable**. The PoC validate
 foundation (all gates passed — see `POC-FINDINGS.md`), and the 2-week MVP per `PLAN.md` is
 **complete**: Week 1 core + durability hardening, Telegram client (D8–9), Web UI (D10–11),
 sandbox sidecar (D12–13), and the D14 hardening & security pass — see the progress log at
-the bottom of `POC-FINDINGS.md`. Remaining post-MVP: §5 item 7 container packaging. Detailed
-plans for post-MVP work live in `docs/plans/` (model catalog — done; smarter approvals —
-all phases done [risk tiers + destructive guard + rich prompts/denial reasons + persistent
-allow-rules + TTL + batching + classifier risk scoring]).
+the bottom of `POC-FINDINGS.md`. Post-MVP since: container packaging (§5 item 7, PR #31),
+Board Project 0 (phases 0a–0d), Collective A1–A4, and M2 remote members (transport + board
+RPC) — all complete. Detailed plans for post-MVP work live in `docs/plans/` (model catalog —
+done; smarter approvals — all phases done [risk tiers + destructive guard + rich prompts/denial
+reasons + persistent allow-rules + TTL + batching + classifier risk scoring]).
 
 ## Repo layout
 
@@ -17,7 +18,9 @@ allow-rules + TTL + batching + classifier risk scoring]).
 - `app/` — the **Collective app** on the composable core (`src/core.ts`): project brain +
   shared board (`src/extensions/board.ts`: members, jobs, channels, knowledge) + Telegram;
   TS, run natively by Node ≥22.19: `src/` (server, extensions),
-  `test/api.test.ts` (48-check live-model integration suite incl. crash recovery),
+  `test/api.test.ts` (91-check live-model integration suite incl. crash recovery),
+  `test/board-remote.test.ts` / `board-remote-live.test.ts` / `board-federation-live.test.ts`
+  (M2 remote-member suites — not in `npm test`, run them separately after board changes),
   `roles.json`/`tools.json` (declarative config), `kb/` (knowledge base), `Dockerfile`.
   Run: `cd app && npm install && npm start`; test: `npm test`.
 - `poc/.env` / `app/.env` — local secrets (gitignored); templates in `.env.example`

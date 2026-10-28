@@ -778,6 +778,47 @@ Federated boards: a board member can live on **another engram instance**. Design
 - M2.2 next: board-owner RPC API (claim/report/route-back) + thin client extension on the remote
   instance so members can participate in the work loop, not just receive messages.
 
+### M2.2 board RPC + remote client ✅ COMPLETE (2026-10-28, `feature/m2-2-board-rpc`)
+
+Remote members now participate in the work loop, not just receive messages. Shipped:
+
+- Board-owner RPC API — app-registered routes on the board owner instance, bearer auth via
+  `BOARD_PEER_TOKENS` (the owner's own `API_TOKEN` resolves to `coordinator`):
+  - `GET /board/jobs` — claimable pool (open, unassigned) + the caller's own claimed jobs.
+  - `POST /board/jobs` — coordinator/human only (`canPostJobInTx`; A2: members don't self-initiate).
+  - `POST /board/jobs/claim` — atomic single-winner claim (reuses `claimJobInTx`).
+  - `POST /board/jobs/:id/status` — done/failed + result, assignee-only (`reportStatusInTx`).
+  - `POST /board/route` — peer routes a message back through the route seam (allowlist + untrusted
+    wrapping intact).
+- Remote board-client extension (`app/src/extensions/boardClient.ts`, opt-in via
+  `BOARD_OWNER_URL` + `BOARD_MEMBER_ID`): pure-HTTP tools `board_list_jobs` / `board_claim_job` /
+  `board_report_status` — the peer brain reads its pool, claims work, reports results.
+- `JobIndexDoc` now tracks `open`/`claimed`/`closed`; the dashboard gained `closedJobs` (done/failed
+  with results) so the owner can verify completed work.
+
+Bugs found by the live federation suite (fixed in the same branch):
+
+1. **Settled-overlay hang** (the big one): spreading a doc proxy (`{...d}`) materializes top-level
+   scalars but leaves nested containers as live overlay refs; HTTP handlers stringify results
+   AFTER the commit settles, so `JSON.stringify` threw inside `route.handle` — and since headers
+   were already written, the outer catch couldn't answer and the client hung. Fix: `toPlainValue()`
+   deep-copies doc-derived values while the tx is live (same pattern A1's `recallInTx` used), and
+   `sendJson` serializes BEFORE `writeHead` so any future serialization failure answers 500.
+2. Owner token unknown to peer routes → the owner couldn't post jobs over HTTP (`peerIdentity`
+   now maps the owner token to `coordinator`).
+3. Parameterized `/board/jobs/:id/status` never matched (the seam does exact method+path matching)
+   → `AppRoute.pattern?: RegExp` (additive to the seam contract), job id from the second-to-last
+   path segment.
+4. Claimed jobs invisible to their assignee (index only tracked open ids) → claimed/closed index
+   lists + dashboard `closedJobs`.
+
+Verification: `board-remote.test.ts` **15/15**; `board-federation-live.test.ts` **20/20** live — two
+real instances, peer claims + reports over HTTP, route-back with untrusted wrapping, single-winner
+over the wire, A2 gates (peer can't post jobs / report on others' jobs), rogue bearer → 401, barred
+target → 403 (auth is checked before resolution, same order as the local `route_message` tool).
+Regression: `board.test.ts` 66/66, `core-instance` 15/15, `api` 91/91, `telegram` 28/28 (one api run
+showed 20 live-run timeouts from shared-endpoint load — clean on re-run).
+
 ### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
 
 The last missing piece of the model-catalog product surface: pick a model when creating a
@@ -802,9 +843,8 @@ phases 0a–0d complete — Project 0 (the board) is DONE. Option A (Collective)
 A2 (peer trust tier + untrusted peer input), A3 (containment of a bad member), and A4 (standing team +
 coordinator triage, end-to-end) complete — the Collective MVP is DONE. Option B (Society) research continues
 on `feature/society-research`.
-Next planned work: M2 remote member transport when a project brain needs its own store;
-Society B1 governance extension — to be built in **its own repo** when we're ready for it
-(owner's decision 2026-10-26). The route seam (ecosystem-flows §5.1), the Collective-app
-reframe (§5.2), the Web UI model picker, and smarter approvals phase 5 (classifier scoring)
-are done — the approvals plan is fully complete.
+Next planned work: Society B1 governance extension — to be built in **its own repo** when we're
+ready for it (owner's decision 2026-10-26). The route seam (ecosystem-flows §5.1), the Collective-app
+reframe (§5.2), the Web UI model picker, smarter approvals phase 5 (classifier scoring), and M2
+(remote member transport + board RPC) are done — the approvals plan is fully complete.
 Everything else in PLAN §4 is complete.
