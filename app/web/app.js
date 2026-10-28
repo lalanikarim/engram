@@ -369,8 +369,10 @@ function ApprovalsBanner({ approvals, onDecided }) {
 
 // ---- shell: sidebar + chat + approvals ----
 
-// ---- board dashboard (polls GET /board) ----
+// ---- board dashboard (polls GET /board — provided by apps like the Collective; solo
+// instances have no /board endpoint, in which case the panel stays hidden) ----
 function BoardPanel({ board }) {
+  if (board === false) return null;
   const members = board?.members ?? [];
   const openJobs = board?.openJobs ?? [];
   return html`<div class="board-section">
@@ -427,15 +429,21 @@ function Shell({ onLogout }) {
   }, [onLogout]);
 
   useEffect(() => {
+    let stopped = false;
     const poll = async () => {
       try {
         setBoard(await api("/board"));
       } catch (err) {
         if (err instanceof AuthError) onLogout();
+        else if (String(err.message).includes("404")) {
+          // No board endpoint on this instance (solo mode) — stop polling, hide the panel.
+          stopped = true;
+          setBoard(false);
+        }
       }
     };
     void poll();
-    const t = setInterval(() => void poll(), 5000);
+    const t = setInterval(() => { if (!stopped) void poll(); }, 5000);
     return () => clearInterval(t);
   }, [onLogout]);
 

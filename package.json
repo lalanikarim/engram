@@ -1,0 +1,30 @@
+{
+  "name": "engram",
+  "version": "0.2.0",
+  "description": "pi-durable project-brain kernel: durable local-model agent core with approval gates, subagents, and a token-auth HTTP/SSE API. Runs standalone as a single project brain (executable mode) or composes into apps via createCoreInstance() (kernel mode).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "main": "./app/dist/core.js",
+  "types": "./app/dist/core.d.ts",
+  "exports": {
+    ".": {
+      "types": "./app/dist/core.d.ts",
+      "default": "./app/dist/core.js"
+    },
+    "./telegram": {
+      "types": "./app/dist/telegram.d.ts",
+      "default": "./app/dist/telegram.js"
+    }
+  },
+  "files": [
+    "app"
+  ],
+  "workspaces": ["app"],
+  "scripts": {
+    "build": "npm run build --workspace app",
+    "prepare": "npm run build"
+  }
+}

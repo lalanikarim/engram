@@ -158,3 +158,33 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
 
   return { harness, server, actualPort, rootConversationId: root.id, close };
 }
+
+// ---- Public surface for apps that compose the kernel (issue #42) -----------------
+// Apps import from "engram" (this module) and "engram/telegram". Keep this list small:
+// only what an app needs to build its own executable on top of createCoreInstance().
+export { loadConfig } from "./config.ts";
+export { loadDotEnv } from "./dotenv.ts";
+export { ConversationMeta } from "./meta.ts";
+export {
+  buildCatalog,
+  defaultModelRef,
+  formatModelRef,
+  loadModelsConfig,
+  parseModelRef,
+  type ModelsConfig,
+} from "./model.ts";
+export { ROOT_INSTRUCTIONS } from "./registry.ts";
+export {
+  readJsonBody,
+  type AppRoute,
+  type RouteContext,
+} from "./server.ts";
+// Approval machinery — exported for apps that compose custom gate setups or run
+// white-box tests against the kernel's approval docs (e.g. the Collective's suites).
+export {
+  approvalHook,
+  ApprovalDoc,
+  parseApprovalMarker,
+  sendMessageTool,
+} from "./extensions/approvals.ts";
+export { compileGates, type GatesConfig } from "./extensions/gates.ts";

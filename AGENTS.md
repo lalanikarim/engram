@@ -2,27 +2,38 @@
 
 ## What this is
 
-A durable, local-model "project brain" agent on **pi-durable**. The PoC validated the
-foundation (all gates passed — see `POC-FINDINGS.md`), and the 2-week MVP per `PLAN.md` is
-**complete**: Week 1 core + durability hardening, Telegram client (D8–9), Web UI (D10–11),
-sandbox sidecar (D12–13), and the D14 hardening & security pass — see the progress log at
-the bottom of `POC-FINDINGS.md`. Post-MVP since: container packaging (§5 item 7, PR #31),
-Board Project 0 (phases 0a–0d), Collective A1–A4, and M2 remote members (transport + board
-RPC) — all complete. Detailed plans for post-MVP work live in `docs/plans/` (model catalog —
-done; smarter approvals — all phases done [risk tiers + destructive guard + rich prompts/denial
-reasons + persistent allow-rules + TTL + batching + classifier risk scoring]).
+The **engram kernel** — a durable, local-model "project brain" agent core on **pi-durable**, in
+two modes:
+
+- **Executable mode**: `node src/main.ts` runs a single project brain (chat + Web UI + optional
+  Telegram), board-free.
+- **Kernel mode**: apps pin `engram` as an npm dependency and compose their own product via
+  `createCoreInstance()`. The flagship app is **[lalanikarim/collective](https://github.com/lalanikarim/collective)**
+  (shared board, jobs, channels, remote members) — the board was extracted from this repo on
+  2026-10-28 (`refactor/extract-collective`).
+
+The PoC validated the foundation (all gates passed — see `POC-FINDINGS.md`), and the 2-week MVP
+per `PLAN.md` is **complete**: Week 1 core + durability hardening, Telegram client (D8–9), Web UI
+(D10–11), sandbox sidecar (D12–13), and the D14 hardening & security pass — see the progress log
+at the bottom of `POC-FINDINGS.md`. Post-MVP since: container packaging (§5 item 7, PR #31),
+Board Project 0 (phases 0a–0d), Collective A1–A4, M2 remote members (transport + board RPC), and
+the repo split — all complete. Detailed plans for post-MVP work live in `docs/plans/` (model
+catalog — done; smarter approvals — all phases done [risk tiers + destructive guard + rich
+prompts/denial reasons + persistent allow-rules + TTL + batching + classifier risk scoring]).
 
 ## Repo layout
 
+- root `package.json` — workspace wrapper (`workspaces: [app]`) named `engram`: carries the
+  exports map (`.`, `./telegram`) + `prepare: build` so git installs compile `app/dist/`.
+  Apps depend on it via `"engram": "github:lalanikarim/engram#<ref>"`.
 - `poc/` — standalone PoC scripts (`00`–`10`) + shared libs in `poc/lib/`
-- `app/` — the **Collective app** on the composable core (`src/core.ts`): project brain +
-  shared board (`src/extensions/board.ts`: members, jobs, channels, knowledge) + Telegram;
-  TS, run natively by Node ≥22.19: `src/` (server, extensions),
-  `test/api.test.ts` (91-check live-model integration suite incl. crash recovery),
-  `test/board-remote.test.ts` / `board-remote-live.test.ts` / `board-federation-live.test.ts`
-  (M2 remote-member suites — not in `npm test`, run them separately after board changes),
-  `roles.json`/`tools.json` (declarative config), `kb/` (knowledge base), `Dockerfile`.
-  Run: `cd app && npm install && npm start`; test: `npm test`.
+- `app/` — the **kernel + solo executable**: composable core (`src/core.ts`, public seam
+  `createCoreInstance()`), internal modules (`registry`, `server`, `sandbox`, `model`, `config`),
+  core extensions (approvals, gates, classifier, subagents, kb/web-fetch/http-tools), Telegram
+  client, Web UI; TS run natively by Node ≥22.19: `src/`, `test/api.test.ts` (91-check live-model
+  integration suite incl. crash recovery), `roles.json`/`tools.json` (declarative config),
+  `kb/` (knowledge base), `Dockerfile`. Run: `cd app && npm install && npm start`; test:
+  `npm test`. **No board code here** — the board + its suites live in lalanikarim/collective.
 - `poc/.env` / `app/.env` — local secrets (gitignored); templates in `.env.example`
 - `POC-PLAN.md` / `POC-FINDINGS.md` — assumptions register and results; `POC-FINDINGS.md`
   doubles as the durable progress log — update it when work completes

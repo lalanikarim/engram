@@ -819,6 +819,41 @@ target → 403 (auth is checked before resolution, same order as the local `rout
 Regression: `board.test.ts` 66/66, `core-instance` 15/15, `api` 91/91, `telegram` 28/28 (one api run
 showed 20 live-run timeouts from shared-endpoint load — clean on re-run).
 
+### Repo split — Collective moves to its own repo ✅ COMPLETE (2026-10-28, `refactor/extract-collective`)
+
+Per owner direction: keep the engram kernel lean. Engram now has two modes — **executable mode**
+(`node src/main.ts` = a single project brain: chat + Web UI + optional Telegram, board-free) and
+**kernel mode** (apps pin `engram` and compose via `createCoreInstance()`). The board, the M2.2 RPC
+wiring, and all 10 board suites moved to **[lalanikarim/collective](https://github.com/lalanikarim/collective)**.
+
+- **Kernel packaging**: Node refuses type-stripping under `node_modules` (verified empirically),
+  so the kernel ships compiled JS for consumers — `npm run build` (tsc → `dist/`, `.ts`→`.js`
+  import rewriting) with a root-level workspace wrapper (`workspaces: [app]`) that carries the
+  exports map (`.`, `./telegram`) and `prepare: build`, so git installs compile automatically.
+  `createCoreInstance()`'s public surface now re-exports what apps need (`loadConfig`,
+  `ConversationMeta`, model-catalog helpers, `ROOT_INSTRUCTIONS`, `readJsonBody`/`AppRoute`/
+  `RouteContext`) plus the approval machinery for app-level white-box tests.
+- **Solo executable**: `main.ts` drops all board wiring (routes, coordinator registration, peer
+  tokens, board-client). Web UI board panel is conditional (hidden on 404 — solo instances have
+  no `/board`); Telegram `/board` command degrades gracefully. `.env.example` loses the `BOARD_*`
+  vars; Dockerfile uses `--ignore-scripts` so `prepare` doesn't run without devDeps in the image.
+- **Collective repo**: `src/main.ts` (board extension + coordinator registration + `GET /board` +
+  M2.2 peer RPC + optional board-client mode + Telegram), `src/extensions/board.ts` /
+  `boardClient.ts`, all 10 board suites, its own `.env.example` (`BOARD_PEER_TOKENS` for owners,
+  `BOARD_OWNER_URL`/`BOARD_MEMBER_ID` for remote members). Pins the kernel via
+  `"engram": "github:lalanikarim/engram#<branch>"` (switches to a tag once the extraction merges).
+- **Outbound comms policy**: each engram can send comms out individually (its own Telegram bot),
+  but for Collective/Society members it's disabled by default — member instances run without
+  `TELEGRAM_BOT_TOKEN`; only the coordinator/owner runs a bot unless selectively enabled. Each
+  engram keeps its own Web UI; embedding member Web UIs in the collective/society Web UI is a later phase.
+- Verification: collective repo green against the pinned kernel — `board` 66/66, live suites
+  6+3+6+3+4+6, `board-remote` 15/15, `board-remote-live` 10/10, `board-federation-live` 20/20.
+  Kernel side: tsc clean; deterministic suites all green (model-catalog 26/26, gates 19/19,
+  approval-rules 18/18, config, sandbox-containment 5/5, core-instance 15/15); `telegram` 28/28;
+  `api` 87/91 — the only 4 failures were live-run timeouts in the first sections during a shared
+  endpoint load spike (post-mortem store showed ~2 min/model turn vs the suite's 180 s run
+  timeout); same suite was 91/91 earlier the same day under normal load.
+
 ### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
 
 The last missing piece of the model-catalog product surface: pick a model when creating a
@@ -845,6 +880,7 @@ coordinator triage, end-to-end) complete — the Collective MVP is DONE. Option 
 on `feature/society-research`.
 Next planned work: Society B1 governance extension — to be built in **its own repo** when we're
 ready for it (owner's decision 2026-10-26). The route seam (ecosystem-flows §5.1), the Collective-app
-reframe (§5.2), the Web UI model picker, smarter approvals phase 5 (classifier scoring), and M2
-(remote member transport + board RPC) are done — the approvals plan is fully complete.
+reframe (§5.2), the Web UI model picker, smarter approvals phase 5 (classifier scoring), M2
+(remote member transport + board RPC), and the repo split (Collective → its own repo) are done —
+the approvals plan is fully complete.
 Everything else in PLAN §4 is complete.
