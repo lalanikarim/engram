@@ -10,7 +10,8 @@ import { createHash } from "node:crypto";
 import type { JsonValue } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineDocFamily, defineTool, hook, ToolTask } from "@earendil-works/pi-durable";
-import { evaluateGate, type CompiledGates, type GateTier } from "./gates.ts";
+import { applyContainment, evaluateGate, type CompiledGates, type GateTier } from "./gates.ts";
+import { ConversationMeta } from "../meta.ts";
 import type { ClassifyAction } from "./classifier.ts";
 
 export type ApprovalState = {
@@ -172,9 +173,24 @@ export function parseApprovalMarker(text: string): ApprovalRequest | undefined {
 }
 
 export function approvalHook(gates: CompiledGates, classify?: ClassifyAction) {
+  const suppressed = new Set<string>();
   return hook(ToolTask, {
     beforeTool: async (call, api, ctx) => {
       let tier = evaluateGate(gates, call.name, call.arguments);
+      // Containment-gated floor suppression (issue #53): a tool declared with
+      // containment:"sandbox" is ungated when this conversation runs sandboxed — the
+      // sealed container is the protection. Uncontained conversations keep the full floor.
+      if (tier !== null && gates.tiers.get(call.name)?.containment === "sandbox") {
+        const meta = await api.snapshot(ConversationMeta, api.conversationId, ctx);
+        tier = applyContainment(gates, call.name, tier, meta?.sandbox === true);
+        if (tier === null) {
+          const key = `${api.conversationId}:${call.name}`;
+          if (!suppressed.has(key)) {
+            suppressed.add(key);
+            console.log(`[gates] conversation ${api.conversationId} runs sandboxed — "${call.name}" is ungated there (containment declaration)`);
+          }
+        }
+      }
       if (tier === null || tier === "auto") return undefined; // ungated or auto-approved
       // Persistent allow-rules: checked after the destructive guard (destructive never
       // matches) and before the prompt block — matching calls pass silently.

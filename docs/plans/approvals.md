@@ -54,7 +54,7 @@ New `app/gates.json` (validated at startup like `tools.json`):
 
 Hook evaluation order (first match wins):
 
-1. **Destructive guard** — any gated call whose serialized args match a `destructivePattern`
+1. **Destructive guard** — any gated call whose args match a `destructivePattern`
    is tier `destructive`: always prompts, with an explicit acknowledgement button
    ("I understand the risk — run it"). **Destructive actions can never be auto-approved and
    can never be covered by persistent allow-rules** — one-shot approvals only. This is the
@@ -64,8 +64,23 @@ Hook evaluation order (first match wins):
    tool's `default` tier (`prompt`) → current block-and-wait flow.
 4. Ungated tools: unchanged.
 
-Pattern matching is regex over the canonical arg rendering (bash: the command string).
-Patterns are deliberately conservative — when in doubt, prompt.
+Pattern matching is regex over the canonical arg rendering (bash: the command string),
+**reduced to simple commands first** (issue #53, 2026-10-28): a bash line is split on `&&`,
+`||`, `|`, `;`, `&`, and newlines (quote-aware); `/dev/*` redirections are dropped
+(discarding output is not a write); quoted string literals are masked — data positions can't
+perform actions — except when the simple command's head is a shell interpreter or `eval`,
+where quoted text is live code and is tested as its own candidate. `reboot`/`shutdown`
+count only as the command being run (head position, after env assignments/`sudo`), never
+as a mentioned word — `grep reboot src/` does not block. Non-bash tools keep conservative
+canonical-JSON matching. Patterns are deliberately conservative — when in doubt, prompt.
+
+**Containment-gated floor suppression** (issue #53): a tier may declare
+`"containment": "sandbox"`. When that conversation runs sandboxed
+(`ConversationMeta.sandbox === true`), the tool is ungated there — neither the destructive
+floor nor the declared tier applies, because the sealed container is the protection. This is
+declarable and loud: `compileGates` warns at startup listing every containment-declared tool,
+and each suppression logs once per conversation/tool. **Uncontained conversations keep the
+absolute floor** — the invariant above survives wherever there is no declared containment.
 
 ### Persistent rules (B) — "always allow this"
 
