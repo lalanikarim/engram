@@ -72,7 +72,7 @@ export type Job = {
   result: JsonValue | null;
 };
 
-export type BoardStatus = { members: EngramProfile[]; openJobs: Job[] };
+export type BoardStatus = { members: EngramProfile[]; openJobs: Job[]; claimedJobs: Job[] };
 
 const EngramDoc = defineDocFamily<EngramProfile, JsonValue>({
   family: true,
@@ -98,11 +98,14 @@ const EngramIndexDoc = defineDoc<{ ids: string[] }>({
   initial: () => ({ ids: [] }),
 });
 
-const JobIndexDoc = defineDoc<{ open: string[] }>({
+// `open` lists unclaimed jobs; `claimed` lists in-flight ones (visible to their assignee
+// via the M2.2 RPC surface); `closed` lists done/failed jobs (surfaced on the dashboard with
+// their results). The job doc itself keeps full history.
+const JobIndexDoc = defineDoc<{ open: string[]; claimed: string[]; closed: string[] }>({
   scope: "session",
   kind: "board.jobIndex",
   version: 1,
-  initial: () => ({ open: [] }),
+  initial: () => ({ open: [], claimed: [], closed: [] }),
 });
 
 // Member self-identity (req 5): a conversation-scoped doc mapping each member's
@@ -220,18 +223,40 @@ export async function postJobInTx(tx: Tx, job: Job): Promise<void> {
   if (!idx.open.includes(job.id)) idx.open.push(job.id);
 }
 
+/**
+ * Deep-copy a doc value to plain data while the tx is still live. Spreading a doc proxy
+ * ({...d}) materializes top-level scalars but leaves nested containers (arrays/objects) as
+ * live overlay references — reading them after the commit settles throws "settled overlay"
+ * (same class of bug A1 hit in recallInTx). HTTP handlers stringify results AFTER settle,
+ * so every doc-derived value that crosses out of a commit must be plain data.
+ */
+function toPlainValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toPlainValue);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = toPlainValue(v);
+    return out;
+  }
+  return value;
+}
+
 /** Read the board summary: registered members + currently-open jobs. */
 export async function readBoardStatusInTx(tx: Tx): Promise<BoardStatus> {
   const engIdx = await tx.doc(EngramIndexDoc);
   const members: EngramProfile[] = [];
-  for (const id of engIdx.ids) members.push({ ...(await tx.doc(EngramDoc, id, {})) });
+  for (const id of engIdx.ids) members.push(toPlainValue(await tx.doc(EngramDoc, id, {})) as EngramProfile);
   const jobIdx = await tx.doc(JobIndexDoc);
   const openJobs: Job[] = [];
   for (const id of jobIdx.open) {
     const j = await tx.doc(JobDoc, id, {});
-    if (j.status === "open") openJobs.push({ ...j });
+    if (j.status === "open") openJobs.push(toPlainValue(j) as Job);
   }
-  return { members, openJobs };
+  const claimedJobs: Job[] = [];
+  for (const id of jobIdx.claimed ?? []) {
+    const j = await tx.doc(JobDoc, id, {});
+    if (j.status === "claimed") claimedJobs.push(toPlainValue(j) as Job);
+  }
+  return { members, openJobs, claimedJobs };
 }
 
 /** Atomic single-winner claim of an open job. Returns the claimed job, or null if not open. */
@@ -244,7 +269,8 @@ export async function claimJobInTx(tx: Tx, jobId: string, meId: string): Promise
   d.claimedBy = meId;
   const idx = await tx.doc(JobIndexDoc);
   idx.open = idx.open.filter((x) => x !== jobId);
-  return { ...d };
+  if (!(idx.claimed ?? []).includes(jobId)) idx.claimed = [...(idx.claimed ?? []), jobId];
+  return toPlainValue(d) as Job;
 }
 
 /** Durable status update for a job (done/failed) with an optional result. */
@@ -252,13 +278,16 @@ export async function reportStatusInTx(tx: Tx, jobId: string, status: "done" | "
   const d = await tx.doc(JobDoc, jobId, {});
   d.status = status;
   d.result = result;
-  return { ...d };
+  const idx = await tx.doc(JobIndexDoc);
+  idx.claimed = (idx.claimed ?? []).filter((x) => x !== jobId);
+  if (!(idx.closed ?? []).includes(jobId)) idx.closed = [...(idx.closed ?? []), jobId]; // closed jobs stay enumerable for the dashboard
+  return toPlainValue(d) as Job;
 }
 
 /** Read a job by id (null if never posted). */
 export async function readJobInTx(tx: Tx, jobId: string): Promise<Job | null> {
   const d = await tx.doc(JobDoc, jobId, {});
-  return d.id === "" ? null : { ...d };
+  return d.id === "" ? null : (toPlainValue(d) as Job);
 }
 
 /** A standing member to create: its own conversation + workspace (cwd) + tools. */
@@ -387,6 +416,14 @@ export async function resolveRouteInTx(tx: Tx, target: string): Promise<RouteTar
   const c = await tx.doc(ChannelDoc, target, {});
   if (c.id !== "") return { conversationId: c.conversationId, kind: "channel" };
   return null;
+}
+
+/**
+ * M2.2 job visibility for a remote member: it sees open jobs nobody has claimed
+ * (the claimable pool) plus its own claimed jobs — never other members' work.
+ */
+export function visibleJobsFor(jobs: readonly Job[], meId: string): Job[] {
+  return jobs.filter((j) => (j.status === "open" && j.assignee === null) || (j.status === "claimed" && j.assignee === meId));
 }
 
 // ---- M2 remote member transport (outbound dispatch) -------------------------
@@ -548,7 +585,7 @@ export async function listChannelsInTx(tx: Tx): Promise<Channel[]> {
 }
 
 /** The full board dashboard: members + open jobs + channels + knowledge. */
-export type BoardDashboard = { members: EngramProfile[]; openJobs: Job[]; channels: Channel[]; knowledge: KnowledgePost[] };
+export type BoardDashboard = { members: EngramProfile[]; openJobs: Job[]; closedJobs: Job[]; channels: Channel[]; knowledge: KnowledgePost[] };
 
 /**
  * Read the board dashboard via snapshots (read-only). Snapshots are used rather than a commit
@@ -568,6 +605,11 @@ export async function readBoardDashboard(reader: DocumentReader, ctx: Context): 
     const j = await reader.snapshot(JobDoc, id, ctx);
     if (j && j.status === "open") openJobs.push({ ...j });
   }
+  const closedJobs: Job[] = [];
+  for (const id of jobIdx?.closed ?? []) {
+    const j = await reader.snapshot(JobDoc, id, ctx);
+    if (j && (j.status === "done" || j.status === "failed")) closedJobs.push({ ...j });
+  }
   const chIdx = await reader.snapshot(ChannelIndexDoc, ctx);
   const channels: Channel[] = [];
   for (const id of chIdx?.ids ?? []) {
@@ -580,7 +622,7 @@ export async function readBoardDashboard(reader: DocumentReader, ctx: Context): 
     const d = await reader.snapshot(KnowledgeDoc, id, ctx);
     if (d && d.id !== "") knowledge.push({ ...d });
   }
-  return { members, openJobs, channels, knowledge };
+  return { members, openJobs, closedJobs, channels, knowledge };
 }
 
 // ---- Tools -------------------------------------------------------------------

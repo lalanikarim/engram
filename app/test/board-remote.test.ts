@@ -22,6 +22,8 @@ import {
   registerMemberInTx,
   resolveRouteInTx,
   validateEndpoint,
+  visibleJobsFor,
+  type Job,
 } from "../src/extensions/board.ts";
 
 let pass = 0;
@@ -80,6 +82,13 @@ check(
   const b = messageRequestId("coordinator", "remote-1", "hello");
   const c = messageRequestId("coordinator", "remote-1", "hello!");
   check("messageRequestId is stable and content-sensitive", a === b && a !== c && a.startsWith("msg-"));
+}
+
+{
+  const mk = (id: string, status: Job["status"], assignee: string | null): Job => ({ id, title: id, requester: "coordinator", assignee, payload: {}, status, claimedBy: assignee, result: null });
+  const jobs = [mk("a", "open", null), mk("b", "claimed", "peer-b"), mk("c", "claimed", "other"), mk("d", "done", "peer-b")];
+  const visible = visibleJobsFor(jobs, "peer-b").map((j) => j.id).sort();
+  check("visibleJobsFor: peers see open-unassigned + their own claimed jobs only", visible.join(",") === "a,b");
 }
 
 // ---- harness-backed: registration, resolution, trust tier ----

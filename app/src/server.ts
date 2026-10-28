@@ -84,6 +84,12 @@ export interface ServerDeps {
   modelsConfig: ModelsConfig;
   /** App-registered routes, tried after the core routes (product/consumer endpoints). */
   routes?: readonly AppRoute[];
+  /**
+   * Additional bearer tokens accepted by the auth gate (M2.2: this instance's peer tokens,
+   * so remote members can reach the board RPC routes). They still only unlock what the
+   * app-registered peer routes expose — identity is re-resolved per route.
+   */
+  extraTokens?: () => readonly string[];
 }
 
 /** Context handed to app-registered routes (see {@link AppRoute}). */
@@ -103,10 +109,15 @@ export interface RouteContext {
  * Matched by exact method + pathname and tried after the core routes, before the
  * 404 fallback. The kernel knows nothing about what apps serve; this is how e.g.
  * the product's GET /board or a consumer's webhook intake reach the instance server.
+ *
+ * `pattern` (optional) replaces exact path matching with a regex tested against the pathname,
+ * for parameterized routes such as `/board/jobs/:id/status`. When present it wins over
+ * `path`, which still documents the route shape.
  */
 export interface AppRoute {
   method: string;
   path: string;
+  pattern?: RegExp;
   handle: (req: http.IncomingMessage, res: http.ServerResponse, routeCtx: RouteContext) => Promise<void>;
 }
 
@@ -232,17 +243,25 @@ async function estimateTranscriptTokens(conv: Conversation): Promise<number> {
   return Math.ceil(chars / 4);
 }
 
-function authorized(req: http.IncomingMessage, token: string): boolean {
+function authorized(req: http.IncomingMessage, tokens: readonly string[]): boolean {
   const header = req.headers["authorization"] ?? "";
-  const expected = `Bearer ${token}`;
-  const a = Buffer.from(header);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  if (!header.startsWith("Bearer ")) return false;
+  const presented = Buffer.from(header.slice(7));
+  let ok = false;
+  for (const token of tokens) {
+    const expected = Buffer.from(token);
+    // Compare every candidate so the timing does not reveal which token matched.
+    if (presented.length === expected.length && timingSafeEqual(presented, expected)) ok = true;
+  }
+  return ok;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  // Serialize BEFORE writeHead: a stringify failure after headers are sent would leave the
+  // client hanging on a body that never arrives (the outer catch can no longer answer).
+  const payload = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
+  res.end(payload);
 }
 
 /** Read a JSON request body (bounded). Exported for app-registered routes. */
@@ -338,7 +357,7 @@ export function createServer(deps: ServerDeps): http.Server {
           return;
         }
       }
-      if (!authorized(req, config.token)) {
+      if (!authorized(req, [config.token, ...(deps.extraTokens?.() ?? [])])) {
         sendJson(res, 401, { error: "unauthorized" });
         return;
       }
@@ -750,7 +769,8 @@ export function createServer(deps: ServerDeps): http.Server {
 
       // App-registered routes (product/consumer endpoints) — after core routes, before 404.
       for (const route of routes ?? []) {
-        if (route.method === req.method && route.path === pathname) {
+        const matches = route.method === req.method && (route.pattern ? route.pattern.test(pathname) : route.path === pathname);
+        if (matches) {
           await route.handle(req, res, routeCtx);
           return;
         }

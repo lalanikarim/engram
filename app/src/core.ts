@@ -52,6 +52,8 @@ export interface CoreInstanceOptions {
   rootInit?: (tx: Tx, conversationId: ConversationId) => Promise<void>;
   /** App-registered HTTP routes (product/consumer endpoints), tried after core routes. */
   routes?: readonly AppRoute[];
+  /** Additional bearer tokens accepted by the server's auth gate (M2.2: peer tokens for board RPC). */
+  extraTokens?: () => readonly string[];
 }
 
 export interface CoreInstance {
@@ -132,7 +134,7 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
 
   const host = opts.host ?? config.host;
   const port = opts.port ?? config.port;
-  const server = createServer({ harness, root, config, modelsConfig, routes: opts.routes });
+  const server = createServer({ harness, root, config, modelsConfig, routes: opts.routes, extraTokens: opts.extraTokens });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => resolve());

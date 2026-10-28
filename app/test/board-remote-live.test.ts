@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { api, killPortSquatter, Stream } from "./helpers.ts";
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = path.resolve(APP_ROOT, "..");
@@ -106,6 +107,9 @@ function spawnInstance(name: string, dirs: { data: string; work: string; kb: str
 
 const dirsA = dirsFor("a");
 const dirsB = dirsFor("b");
+// Preflight: clear orphaned listeners from earlier aborted runs (EADDRINUSE on spawn).
+killPortSquatter(PORT_A);
+killPortSquatter(PORT_B);
 // B first (A needs B's URL + token to exist conceptually, though startup order doesn't matter).
 const procB = spawnInstance("b", dirsB, PORT_B, TOKEN_B);
 const procA = spawnInstance("a", dirsA, PORT_A, TOKEN_A, { BOARD_PEER_TOKENS: `peer-b:${TOKEN_B}` });
@@ -123,21 +127,6 @@ const cleanup = () => {
 process.on("exit", cleanup);
 process.on("SIGINT", () => process.exit(130));
 
-async function api(port: number, token: string, method: string, pathname: string, body?: unknown): Promise<{ status: number; json: any }> {
-  const res = await fetch(`http://127.0.0.1:${port}${pathname}`, {
-    method,
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  let json: any = null;
-  try {
-    json = await res.json();
-  } catch {
-    // non-JSON response
-  }
-  return { status: res.status, json };
-}
-
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
@@ -153,81 +142,6 @@ async function waitReady(port: number, token: string): Promise<boolean> {
     }
   }
   return false;
-}
-
-type StreamEvent = { event: string; data: any };
-class Stream {
-  private controller = new AbortController();
-  events: StreamEvent[] = [];
-  private waiters: Array<() => void> = [];
-
-  constructor(port: number, token: string, conversationId: number) {
-    const url = `http://127.0.0.1:${port}/stream?conversationId=${conversationId}&cursor=0`;
-    (async () => {
-      const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: this.controller.signal });
-      if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`);
-      let buf = "";
-      const reader = res.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += new TextDecoder().decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n\n")) !== -1) {
-          const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          let event = "message";
-          let data = "";
-          for (const line of frame.split("\n")) {
-            if (line.startsWith("event: ")) event = line.slice(7);
-            else if (line.startsWith("data: ")) data += line.slice(6);
-          }
-          if (data) {
-            try {
-              this.events.push({ event, data: JSON.parse(data) });
-            } catch {
-              // keep raw frames out of the typed stream
-            }
-            for (const w of this.waiters.splice(0)) w();
-          }
-        }
-      }
-    })().catch(() => {});
-  }
-
-  close(): void {
-    this.controller.abort();
-  }
-
-  async waitFor(pred: (e: StreamEvent) => boolean, timeoutMs: number): Promise<StreamEvent | undefined> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const hit = this.events.find(pred);
-      if (hit) return hit;
-      if (Date.now() > deadline) return undefined;
-      await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, 250);
-        this.waiters.push(() => {
-          clearTimeout(t);
-          resolve();
-        });
-      });
-    }
-  }
-
-  async waitForRunEnd(submissionId: number, timeoutMs: number): Promise<boolean> {
-    const ev = await this.waitFor(
-      (e) => e.event === "event" && e.data.type === "run_end" && Array.isArray(e.data.inputs) && e.data.inputs.includes(submissionId),
-      timeoutMs,
-    );
-    return ev !== undefined;
-  }
-
-  toolResultTexts(toolName?: string): string[] {
-    return this.events
-      .filter((e) => e.event === "entry" && e.data.summary?.role === "toolResult" && (!toolName || e.data.summary.toolName === toolName))
-      .map((e) => e.data.summary.textPreview ?? "");
-  }
 }
 
 // ---- boot both instances ----

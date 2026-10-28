@@ -202,8 +202,10 @@ function registerCustomProvider(models: MutableModels, id: string, spec: NonNull
 
 /** GET /v1/models → the loaded model's id (first entry if no `loaded` flag). */
 async function discoverLoadedModel(baseUrl: string, apiKey: string): Promise<string> {
+  // Timeout: a busy local inference box can stall; fail fast so startup errors are actionable.
   const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
     headers: { authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     throw new Error(`GET /models failed: ${res.status} — check OPENAI_BASE_URL/OPENAI_API_KEY`);
