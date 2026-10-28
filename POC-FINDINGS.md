@@ -841,7 +841,8 @@ wiring, and all 10 board suites moved to **[lalanikarim/collective](https://gith
   M2.2 peer RPC + optional board-client mode + Telegram), `src/extensions/board.ts` /
   `boardClient.ts`, all 10 board suites, its own `.env.example` (`BOARD_PEER_TOKENS` for owners,
   `BOARD_OWNER_URL`/`BOARD_MEMBER_ID` for remote members). Pins the kernel via
-  `"engram": "github:lalanikarim/engram#<branch>"` (switches to a tag once the extraction merges).
+  `"engram": "github:lalanikarim/engram#v0.1.0"` — the tagged release cut from the merged
+  extraction; bump the tag ref when the kernel evolves.
 - **Outbound comms policy**: each engram can send comms out individually (its own Telegram bot),
   but for Collective/Society members it's disabled by default — member instances run without
   `TELEGRAM_BOT_TOKEN`; only the coordinator/owner runs a bot unless selectively enabled. Each
