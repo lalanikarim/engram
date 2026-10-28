@@ -6,8 +6,10 @@ FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
+# --ignore-scripts: the kernel's prepare step (tsc build for consumers) needs devDeps,
+# which are omitted here; the container runs the TS sources directly.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && chown -R node:node /app
+RUN npm ci --omit=dev --ignore-scripts && chown -R node:node /app
 
 COPY --chown=node:node src ./src
 COPY --chown=node:node roles.json tools.json ./

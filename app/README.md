@@ -1,14 +1,21 @@
-# engram — the Collective app (project brain + standing team)
+# engram — durable local-model project brain (kernel + solo executable)
 
-The flagship app on the engram core: a durable, local-model "project brain" assistant on
-**pi-durable** with a **shared board** — a standing team of named members (each with its own
-workspace, model, and domain memory) coordinated by the root conversation. Token-auth HTTP/SSE
-API, approval-gated external actions, parallel subagents, per-conversation workspaces,
-config-driven tool extension, a Telegram client (long polling), and sandboxed code execution in
-disposable Podman sidecars. Runs as a single Node container (no build step — Node runs the
-TypeScript sources natively).
+A durable, local-model "project brain" agent on **pi-durable**, in two modes:
 
-Ecosystem framing (kernel vs. apps, solo/collective/society flows): [`docs/ecosystem-flows.md`](../docs/ecosystem-flows.md).
+- **Executable mode** — `node src/main.ts` runs a single project-brain agent: chat + Web UI +
+  optional Telegram client, token-auth HTTP/SSE API, approval-gated external actions, parallel
+  subagents, per-conversation workspaces, config-driven tool extension, and sandboxed code
+  execution in disposable Podman sidecars. No build step — Node runs the TypeScript sources
+  natively (type stripping).
+- **Kernel mode** — apps pin engram as a component and call `createCoreInstance()` to compose
+  their own product on top of the same durable runtime. The flagship app is
+  **[lalanikarim/collective](https://github.com/lalanikarim/collective)** (a fleet of project
+  brains with a shared board, jobs, channels, and remote members). The kernel knows nothing
+  about boards or fleets; apps install their machinery via `extraExtensions` + app-registered
+  routes.
+
+Ecosystem framing (kernel vs. apps, solo/collective/society flows):
+[`docs/ecosystem-flows.md`](../docs/ecosystem-flows.md).
 
 ## Requirements
 
@@ -18,7 +25,7 @@ Ecosystem framing (kernel vs. apps, solo/collective/society flows): [`docs/ecosy
 - Optional: Podman — required only for sandboxed conversations (`sandbox: true`). On macOS the
   sandbox workspace must live under `$HOME` (the Podman VM shares only the home directory).
 
-## Run locally
+## Run locally (solo)
 
 ```bash
 cd app
@@ -33,11 +40,13 @@ workspaces under `work/`, knowledge base in `kb/`.
 ## Run tests
 
 ```bash
-npm test                  # two live-model suites against a real server over temp dirs:
-#   test/api.test.ts      48 checks: API surface, tools, approvals, subagents, steering,
-#                         SIGKILL mid-run recovery, pending-approval-across-crash, double-submit races
-#   test/telegram.test.ts 18 checks: binding, task→progress→answer, access control,
-#                         inline approval button → callback → settle → retry, topic→fork, state file
+npm test                  # live-model suites against a real server over temp dirs:
+#   test/api.test.ts      91 checks: API surface, tools, approvals (tiers/rules/TTL/batching),
+#                         subagents, steering, SIGKILL mid-run recovery, pending-approval-across-crash,
+#                         double-submit races
+#   test/telegram.test.ts 28 checks: binding, task→progress→answer, access control,
+#                         inline approval button → callback → settle → retry, topic→fork, model picker,
+#                         persistent allow-rules
 
 node test/webui.test.ts   # 20 Playwright e2e checks (needs a local Playwright install —
                           # not a repo dependency): token gate, live-streamed answers,
@@ -54,62 +63,48 @@ node test/hardening.test.ts # 13 checks (D14; part B needs Podman): prompt-injec
                           # SIGKILL mid-run in a sandboxed conversation → orphan sweep → resume
 ```
 
+Board/fleet suites live with the Collective app: `github.com/lalanikarim/collective`.
+
 ## Composable core (issue #42)
 
-The instance construction is exported as a public seam so external projects can build on the
-engram core as a pinned component instead of forking it: `createCoreInstance()` in
-[`src/core.ts`](src/core.ts) assembles config → model catalog → registry → harness → root
-conversation → HTTP server, and accepts `extraExtensions` (plain pi-durable extension objects,
-installed before `Harness.open`), optional `host`/`port` (`0` = ephemeral, actual port returned),
-`routes` (app-registered HTTP endpoints — how this app serves `GET /board`), and a deterministic
-idempotent `close()`. `loadConfig(overrides?)` supplies per-instance config. `src/main.ts` is the
-Collective-app composition on top (board extension + coordinator registration, `GET /board`
-route, Telegram client, shutdown wiring) — standalone behavior is unchanged. Stability contract:
-the instance lifecycle and the extension/route injection points are stable across versions; options
-and config fields are additive. Note that `extraExtensions` run with full core privilege —
-consequential consumer actions should register their own approval-gated tools through the existing
-gates mechanism. Covered by `test/core-instance.test.ts` (seam visibility, route seam, teardown/port
-release, two instances per process).
+`createCoreInstance()` in [`src/core.ts`](src/core.ts) is the public seam apps build on. It
+assembles config → model catalog → registry → harness → root conversation → HTTP server, and
+accepts:
+
+- `extraExtensions` — plain pi-durable extension objects, installed after the core set, before
+  `Harness.open` (run with full core privilege — vet them like first-party code; consequential
+  actions should register their own approval-gated tools through the existing gates mechanism)
+- `routes` — app-registered HTTP endpoints, tried after core routes (how apps serve their own
+  surfaces, e.g. the Collective's `GET /board`)
+- `extraTokens` — extra bearer tokens accepted by the auth gate (e.g. peer tokens for an
+  app's RPC surface; identity is re-resolved per route)
+- `rootAgent` / `rootInit` — root conversation agent + a deterministic init commit
+- optional `host`/`port` (`0` = ephemeral; actual port returned), and a deterministic idempotent
+  `close()`
+
+The package exports the app-facing surface: `import { createCoreInstance, loadConfig, ... }
+from "engram"` and `import { TelegramClient } from "engram/telegram"`. Consumers get compiled
+JS — `npm run build` emits `dist/` (tsc), and `prepare` runs it automatically on git installs.
+Stability contract: the instance lifecycle and the extension/route/token injection points are
+stable across versions; options and config fields are additive. Breaking changes require a major
+version bump with a deprecation window. Covered by `test/core-instance.test.ts` (seam visibility,
+route seam, teardown/port release, two instances per process).
 
 Flows and the product-engineer reference: [`docs/ecosystem-flows.md`](../docs/ecosystem-flows.md)
 (current; self-contained HTML edition alongside it) — `docs/product-core-split.md` remains the
 PR #43 record for this seam API.
 
-## The board (Collective)
+## Apps built on the kernel
 
-The app composes a **shared board** over the core: the root conversation is the standing
-**coordinator**, and named **members** are persistent specialist conversations, each with its own
-workspace (`work/<name>`), optional model, domain memory (`MEMORY.md` via `remember`/`recall`),
-and tool set. Members coordinate through board docs — jobs (atomic single-winner `claim_job`),
-peer messages (`route_message`, delivered as `<untrusted>` data), channels, and a knowledge base
-with provenance + trust tier. Peer routing is allowlist-gated (`allowedTargets`); members can be
-disabled/enabled centrally and durably (`disable_member`/`enable_member`). The human posts work to
-the coordinator, reads `GET /board` (or Telegram `/board`), and approves — member side effects still
-route through the standard approval gates.
+- **[Collective](https://github.com/lalanikarim/collective)** — a fleet of project brains: a
+  shared board (named members with own workspaces/models/domain memory, jobs with atomic
+  single-winner claims, channels, knowledge exchange), a standing coordinator, peer trust tiers
+  + allowlists, remote members on other engram instances (M2 transport + M2.2 board RPC).
 
-**Remote members (M2.1)**: a member can live on *another engram instance* — its profile carries an
-`endpoint` (that instance's base URL) and a `tokenRef` (a name in this board owner's
-`BOARD_PEER_TOKENS` env; the bearer token itself is never stored in SQLite). `route_message` to a
-remote member POSTs to that instance's `/tasks` with a stable exactly-once request id, wrapped in
-the same `<untrusted>` delimiters (remote members default to `trustLevel: "untrusted"`).
-Registration goes through the coordinator's `register` tool or `POST /board/members`; the Web board
-panel marks such members with a `remote` badge. Design + decisions:
-[`docs/plans/m2-remote-members.md`](../docs/plans/m2-remote-members.md).
-
-| Tool | Who | Purpose |
-|---|---|---|
-| `create_member` | coordinator/human | register a named member (own conversation + workspace) |
-| `post_job` | coordinator/human | open a job on the board (atomic, indexed) |
-| `claim_job` / `report_status` | members | atomic single-winner claim; done/failed + result |
-| `route_message` | allowlisted members, coordinator, human | peer message, delivered as untrusted data, exactly-once |
-| `board_status` | all members | members + open jobs |
-| `remember` / `recall` | members | durable domain memory across sessions/compaction |
-| `publish_knowledge` / `read_knowledge` | coordinator/human / all | knowledge posts with provenance + trust tier |
-| `disable_member` / `enable_member` | coordinator/human | durable central freeze of a member |
-
-Design: [`docs/plans/collective.md`](../docs/plans/collective.md) (phases A1–A4, all complete);
-board research: [`docs/research/board.md`](../docs/research/board.md). Tests: `test/board.test.ts`
-(deterministic) + the `board-*-live` suites.
+Placement rules for new apps: durable state inside an instance → app-layer extension via
+`extraExtensions`; read/write through public primitives only → upstream client; new HTTP
+endpoint → app-registered route via the route seam (never a kernel special case); consequential
+side effect from any layer → approval-gated tool.
 
 ## Web UI
 
@@ -118,7 +113,9 @@ no build step) with a token gate. Static assets are public; every data route kee
 bearer-token requirement. It supports: conversation list + creation (with model pick), full
 transcript view, live streaming via SSE (cursor-based reconnect), steering a running turn,
 per-conversation model switching (chat header), and the pending-approvals panel
-(Approve/Deny → 409-safe idempotent decisions).
+(Approve/Deny → 409-safe idempotent decisions). If the instance serves a `GET /board` endpoint
+(as the Collective app does), a board dashboard panel appears in the sidebar; solo instances
+have none.
 
 ## Sandboxed execution (D12–13)
 
@@ -150,10 +147,11 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
 | `PATCH /conversations/:id` | `{model?: "<provider>:<modelId>" \| null}` → durable per-conversation model switch (`null` resets to the global default) |
 | `GET /models` | full catalog: every provider's models with availability + the default ref |
 | `POST /steer` | `{content, requestId[, conversationId]}` → inject input into a running turn (`whenBusy: "steer"`) |
-| `GET /board` | board dashboard: members, open jobs, channels, knowledge + pending approvals (app-registered route) |
-| `POST /board/members` | register/update a member (incl. remote: `endpoint` + `tokenRef`) — idempotent on `id` |
 | `GET /approvals` | pending approval requests discovered from transcript markers |
 | `POST /approvals/:key` | `{decision: "approved" \| "denied"}` → durable decision (409 if already decided — idempotent under double-tap races) |
+
+App-registered routes (e.g. the Collective's `/board*` family) are served by the same server
+after these core routes; see the app's README for its surface.
 
 ## Telegram client (optional)
 
@@ -161,7 +159,7 @@ Enabled when `TELEGRAM_BOT_TOKEN` is set. Long polling only — outbound connect
 no inbound ports. The bound chat maps to the root conversation; forum topics map to forks
 of it (created on first use, named after the topic). Progress streams as a single edited
 message per run; gated actions get inline Approve/Deny buttons (settled after the decision);
-`approve <key>` / `deny <key>` works as a text fallback; `/board` renders the board dashboard. Chat bindings and the polling offset
+`approve <key>` / `deny <key>` works as a text fallback. Chat bindings and the polling offset
 persist in `data/telegram-state.json`, so restarts rebind without replaying updates
 (`requestId = tg-<update_id>` keeps redelivered updates exactly-once).
 

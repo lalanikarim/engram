@@ -11,6 +11,9 @@ poc/work/
 poc/sandbox-test/
 app/data/
 app/work/
+
+# kernel build output for consumers (npm run build; git deps rebuild via prepare)
+app/dist/
 *.sqlite
 *.sqlite-*
 

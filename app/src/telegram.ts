@@ -478,11 +478,16 @@ export class TelegramClient {
     }
   }
 
-  /** /board command: the shared board dashboard (members, open jobs, pending approvals). */
+  /** /board command: the shared board dashboard (members, open jobs, pending approvals).
+   * Served by apps that register a GET /board route (the Collective); solo instances have none. */
   private async handleBoardCommand(chatId: number, threadId?: number): Promise<void> {
     const target = { chat_id: chatId, ...(threadId ? { message_thread_id: threadId } : {}) };
     try {
       const res = await fetch(`${this.opts.apiBaseUrl}/board`, { headers: { authorization: `Bearer ${this.opts.apiToken}` } });
+      if (res.status === 404) {
+        await this.tg("sendMessage", { ...target, text: "This instance has no board (solo mode)." }).catch(() => {});
+        return;
+      }
       if (!res.ok) throw new Error(`board fetch failed: ${res.status}`);
       const body = (await res.json()) as {
         members?: Array<{ name: string; kind: string }>;
