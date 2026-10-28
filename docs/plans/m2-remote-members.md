@@ -1,6 +1,9 @@
 # M2 — Remote member transport (federated boards)
 
-Status: **M2.1 outbound dispatch implemented** (2026-10-27); M2.2 board RPC API + client pending.
+Status: **Complete** — M2.1 outbound dispatch (2026-10-27) and M2.2 board RPC API + client both
+shipped; the board code (including all M2 wiring) moved to
+[lalanikarim/collective](https://github.com/lalanikarim/collective) in the 2026-10-28 repo split
+(`refactor/extract-collective`).
 Builds on the complete Project 0 board + Collective A1–A4 (`docs/plans/collective.md`). Framing:
 [`../ecosystem-flows.md`](../ecosystem-flows.md) §2 (M1 vs M2), §5.3 (this work).
 
@@ -67,7 +70,7 @@ unchanged.
   transcript contains the coordinator-sourced, untrusted-wrapped message.
 - Regression: `board.test.ts` 66/66, `board-live.test.ts` 6/6 (no M1 behavior change).
 
-## M2.2 — board RPC API + client (next)
+## M2.2 — board RPC API + client (done, now in the collective repo)
 
 Remote members should participate in the board's work loop, not just receive messages:
 

@@ -154,9 +154,9 @@ smarter approvals — phases 1–4 done, phase 5 next — deferred (classifier s
 PoC passed all gates; **the full 2-week MVP is complete**: Week 1 core + durability
 hardening, Telegram client (D8–9), Web UI (D10–11), sandbox sidecar (D12–13), and the D14
 hardening & security-checklist pass are all merged (see the progress log at the bottom of
-`POC-FINDINGS.md`). Remaining: post-MVP follow-up — §5 item 7 container packaging (unprivileged
-agent container, engine socket kept out, scoped podman wrapper in a 2-service compose,
-host firewall rules).
+`POC-FINDINGS.md`). **Everything in this plan is complete**, including §5 item 7 container
+packaging (PR #31: unprivileged agent container, engine socket kept out, scoped podman
+wrapper in a 2-service compose, host firewall rules). Post-MVP direction: see §9.
 
 ## 9. Post-MVP direction — open decisions (2026-10-24)
 
