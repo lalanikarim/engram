@@ -17,7 +17,7 @@ nothing about boards, fleets, charters, or factories.
 | Layer | Where | What it owns |
 |---|---|---|
 | **Kernel** | `app/src/core.ts` + internal modules (`registry`, `server`, `sandbox`, `model`, `config`) | Durable runtime: harness over SQLite, exactly-once submissions, documents, approval machinery (`beforeTool` gates + allow-rules + destructive guard), sandbox manager, model catalog, HTTP/SSE server, deterministic teardown |
-| **Apps** (one product per composition) | In-repo: `app/src/main.ts` (the Collective app). Out-of-repo: drydock, future Society tooling | A fleet supervisor and/or a single instance plus its own client surfaces (dashboards, Telegram commands, webhooks). Installed in-harness via `extraExtensions`; persona via `rootAgent`/`rootInit` |
+| **Apps** (one product per composition) | In-repo: the solo executable (`app/src/main.ts`). Out-of-repo: [lalanikarim/collective](https://github.com/lalanikarim/collective) (the flagship — shared board + remote members), drydock, future Society tooling | A fleet supervisor and/or a single instance plus its own client surfaces (dashboards, Telegram commands, webhooks). Installed in-harness via `extraExtensions`; persona via `rootAgent`/`rootInit` |
 | **Upstream clients** | Any process over the HTTP API | Observe/administer: governance consoles, audit explorers, per-role approval clients. Never mutate durable state directly |
 
 ### Members have two tiers — a conversation or a brain
@@ -321,9 +321,16 @@ every bump.
 
 1. ~~**Route seam in kernel**~~ — **done**: `createCoreInstance({ routes })` / `ServerDeps.routes`; `/board` now registers from the product layer (`main.ts`), the kernel is board-free.
 2. ~~**Reframe `app/` as the Collective app**~~ — **done**: READMEs, module headers, and repo docs now name it as such; the board is documented in `app/README.md`.
-3. ~~**Remote member transport (M2)**~~ — **M2.1 done** (2026-10-27): remote members on other instances
-   (`endpoint` + `tokenRef`, tokens only in the board owner's `BOARD_PEER_TOKENS` env);
-   `route_message` dispatches to the peer's `/tasks` — exactly-once by requestId, fire-and-forget
-   on 202, untrusted-wrapped inbound. M2.2 next: board-owner RPC API (claim/report/route-back) +
-   client extension. Design and decisions: [`plans/m2-remote-members.md`](plans/m2-remote-members.md).
-4. **Governance extension (Society B1–B4)** — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.
+3. ~~**Remote member transport (M2)**~~ — **done** (M2.1 2026-10-27, M2.2 2026-10-28): remote members on
+   other instances (`endpoint` + `tokenRef`, tokens only in the board owner's `BOARD_PEER_TOKENS`
+   env); `route_message` dispatches to the peer's `/tasks` — exactly-once by requestId,
+   fire-and-forget on 202, untrusted-wrapped inbound. M2.2 adds the board-owner RPC API
+   (claim/report/route-back) + the thin board-client extension so remote members join the work loop.
+   Design and decisions: [`plans/m2-remote-members.md`](plans/m2-remote-members.md).
+4. ~~**Extract the Collective into its own repo**~~ — **done** (2026-10-28): the board + M2 wiring
+   moved to [lalanikarim/collective](https://github.com/lalanikarim/collective), which pins the kernel
+   as an npm dependency (`engram` from git, `prepare` compiles `dist/`) and composes it via
+   `createCoreInstance()`. The engram repo keeps the kernel + the solo executable; its root
+   package wrapper exposes the exports map for consumers. Outbound comms on member instances stay
+   disabled by default (selectively enableable per member).
+5. **Governance extension (Society B1–B4)** — app-layer package composed alongside board; kernel change only at B6 if multi-human approval routing demands it.
