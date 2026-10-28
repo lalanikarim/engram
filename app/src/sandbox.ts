@@ -72,6 +72,11 @@ export class PodmanSandboxEnv {
     this.id = `podman:${this.containerId}`;
   }
 
+  /** Identity info for supervision (issue #44). */
+  get info(): { containerId: string; workspace: string; image: string } {
+    return { containerId: this.containerId, workspace: this.workspace, image: this.image };
+  }
+
   async init(context: Context): Promise<void> {
     mkdirSync(this.workspace, { recursive: true });
     // §5 item 7 containment: only approved base images and mounts may be used.
@@ -413,6 +418,12 @@ export class SandboxManager {
       this.cache.set(conversationId, { env, stopStream: async () => undefined, cancelWatch: cancel });
     }
     return env;
+  }
+
+  /** Per-conversation container info, or null when no live sandbox for this conversation (issue #44). */
+  lookup(conversationId: ConversationId): { containerId: string; workspace: string; image: string } | null {
+    const entry = this.cache.get(conversationId);
+    return entry ? entry.env.info : null;
   }
 
   /** Remove orphaned sandbox containers left behind by a crashed previous run. */
