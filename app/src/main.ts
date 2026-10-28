@@ -20,6 +20,10 @@ async function main() {
   const defaultRef = await defaultModelRef(modelsConfig);
   console.log(`[engram] default model: ${formatModelRef(defaultRef)}`);
 
+  // Late-bound: the Telegram client is created after the instance (it needs actualPort),
+  // so scheduled-failure pings route through this holder once it's set.
+  let telegramRef: TelegramClient | undefined;
+
   const instance = await createCoreInstance({
     config,
     modelsConfig,
@@ -29,6 +33,11 @@ async function main() {
       if (!d.name) d.name = "root";
       d.createdAt = Date.now();
       return undefined;
+    },
+    onScheduledFailure: async (entry, settled) => {
+      if (!telegramRef) return; // no Telegram → nothing to deliver a failure ping to
+      const text = `⚠️ Scheduled check "${entry.id}" failed (${settled.reason}). See the conversation for details.`;
+      await telegramRef.notifyConversation(entry.conversationId, text).catch(() => {});
     },
   });
 
@@ -46,6 +55,7 @@ async function main() {
       apiToken: config.token,
       rootConversationId: instance.rootConversationId,
     });
+    telegramRef = telegram;
     await telegram.start();
   }
 

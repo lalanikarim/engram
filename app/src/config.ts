@@ -19,6 +19,20 @@ export type RoleConfig = {
 
 import type { GatesConfig } from "./extensions/gates.ts";
 
+/** One declarative scheduled check (app/schedules.json, issue #58). */
+export type ScheduleSpec = {
+  /** Stable id; also the idempotency anchor for its firings. */
+  id: string;
+  /** Target conversation: "root", a conversation name, or a numeric id. */
+  conversation: string | number;
+  /** Prompt submitted as input when the schedule fires. */
+  prompt: string;
+  /** 5-field cron expression (local time). */
+  cron: string;
+  /** Disabled schedules are stored but never fire. Default true. */
+  enabled?: boolean;
+};
+
 /** One declarative HTTP tool (app/tools.json). */
 export type HttpToolSpec = {
   name: string;
@@ -66,6 +80,12 @@ export type AppConfig = {
     /** Bot API base override (default https://api.telegram.org/bot<token>); tests point this at a mock. */
     apiBase?: string;
   } | null;
+  /** Declarative scheduled checks (app/schedules.json, issue #58). */
+  schedules: ScheduleSpec[];
+  /** Scheduler tick interval in ms (SCHEDULER_TICK_MS, default 30000). */
+  schedulerTickMs: number;
+  /** Missed-slot policy (SCHEDULER_MISSED_POLICY: "skip" | "catch-up", default "skip"). */
+  missedFiringPolicy: "skip" | "catch-up";
 };
 
 function resolveDir(value: string | undefined, fallback: string): string {
@@ -88,6 +108,8 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const roles = readJson<RoleConfig[]>(path.join(configDir, "roles.json"), []);
   const httpTools = readJson<HttpToolSpec[]>(path.join(configDir, "tools.json"), []);
   for (const spec of httpTools) validateHttpToolSpec(spec);
+  const schedules = readJson<ScheduleSpec[]>(path.join(configDir, "schedules.json"), []);
+  for (const spec of schedules) validateScheduleSpec(spec);
 
   const config: AppConfig = {
     host: process.env.HOST ?? "127.0.0.1",
@@ -134,6 +156,12 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
           apiBase: process.env.TELEGRAM_API_BASE || undefined,
         }
       : null,
+    schedules,
+    schedulerTickMs: (() => {
+      const ms = Number(process.env.SCHEDULER_TICK_MS ?? 30_000);
+      return Number.isFinite(ms) && ms > 0 ? ms : 30_000;
+    })(),
+    missedFiringPolicy: process.env.SCHEDULER_MISSED_POLICY === "catch-up" ? "catch-up" : "skip",
   };
 
   return { ...config, ...overrides };
@@ -146,6 +174,15 @@ function readJson<T>(file: string, fallback: T): T {
   } catch (err) {
     throw new Error(`failed to parse ${file}: ${String(err)}`);
   }
+}
+
+function validateScheduleSpec(spec: ScheduleSpec): void {
+  if (!spec.id || typeof spec.id !== "string") throw new Error(`schedule missing string "id"`);
+  if (spec.conversation === undefined || (typeof spec.conversation !== "string" && typeof spec.conversation !== "number")) {
+    throw new Error(`schedule "${spec.id}": "conversation" must be a name, "root", or a numeric id`);
+  }
+  if (!spec.prompt || typeof spec.prompt !== "string") throw new Error(`schedule "${spec.id}" missing string "prompt"`);
+  if (!spec.cron || typeof spec.cron !== "string") throw new Error(`schedule "${spec.id}" missing string "cron"`);
 }
 
 function validateHttpToolSpec(spec: HttpToolSpec): void {
