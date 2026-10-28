@@ -1,0 +1,11 @@
+{
+  "name": "engram",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["app"],
+  "scripts": {
+    "build": "npm run build --workspace app",
+    "prepare": "npm run build"
+  }
+}
