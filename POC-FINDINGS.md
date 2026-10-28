@@ -847,8 +847,12 @@ wiring, and all 10 board suites moved to **[lalanikarim/collective](https://gith
   `TELEGRAM_BOT_TOKEN`; only the coordinator/owner runs a bot unless selectively enabled. Each
   engram keeps its own Web UI; embedding member Web UIs in the collective/society Web UI is a later phase.
 - Verification: collective repo green against the pinned kernel — `board` 66/66, live suites
-  6+3+6+3+4+6, `board-remote` 15/15, `board-remote-live` 10/10, `board-federation-live` 20/20;
-  kernel side: tsc clean + full core suite (see branch).
+  6+3+6+3+4+6, `board-remote` 15/15, `board-remote-live` 10/10, `board-federation-live` 20/20.
+  Kernel side: tsc clean; deterministic suites all green (model-catalog 26/26, gates 19/19,
+  approval-rules 18/18, config, sandbox-containment 5/5, core-instance 15/15); `telegram` 28/28;
+  `api` 87/91 — the only 4 failures were live-run timeouts in the first sections during a shared
+  endpoint load spike (post-mortem store showed ~2 min/model turn vs the suite's 180 s run
+  timeout); same suite was 91/91 earlier the same day under normal load.
 
 ### Web UI model picker ✅ COMPLETE (2026-10-26, `feature/webui-model-picker`)
 
