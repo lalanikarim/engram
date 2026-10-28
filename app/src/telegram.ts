@@ -269,6 +269,22 @@ export class TelegramClient {
     return this.stoppedFlag;
   }
 
+  /**
+   * Send a one-off message to the chat bound to `convId` (issue #58 failure pings).
+   * Returns false when the conversation has no Telegram binding (nothing to deliver to).
+   */
+  async notifyConversation(convId: number, text: string): Promise<boolean> {
+    const key = Object.entries(this.state.chats).find(([, b]) => b.conversationId === convId)?.[0];
+    if (!key) return false;
+    const { chatId, threadId } = parseChatKey(key);
+    await this.tg("sendMessage", {
+      chat_id: chatId,
+      ...(threadId ? { message_thread_id: threadId } : {}),
+      text: text.slice(0, 4000),
+    });
+    return true;
+  }
+
   /** Bot API call (outbound HTTPS only). */
   async tg(method: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const res = await fetch(`${this.apiBase}/${method}`, {

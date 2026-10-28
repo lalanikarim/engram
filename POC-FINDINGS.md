@@ -902,6 +902,44 @@ conversation, and switch any conversation's model from the chat header.
 
 Verification: `tsc --noEmit` clean; `node test/webui.test.ts` **20 passed, 0 failed** (live model).
 
+### Scheduled checks — cron-driven proactive runs ✅ COMPLETE (2026-10-28, `feature/scheduled-checks`, issue #58)
+
+The highest-leverage "brain" upgrade from PLAN §9: the kernel proactively runs scheduled jobs and
+delivers results to Telegram. Phase 1 (core loop + declarative config + durable state + delivery);
+phases 2–3 (ad-hoc tools, HTTP API, rich failure detail) are follow-ups.
+
+- `app/src/extensions/scheduler.ts` (new): a `Scheduler` with an in-kernel tick loop over a
+  session-scoped singleton `ScheduleDoc` (`mvp.schedules`). Each due schedule durably submits its
+  prompt to the target conversation under a **deterministic per-slot `requestId`
+  (`sched:<id>:<slotMs>`)** — idempotent across crash-retries. Success is delivered by the existing
+  Telegram `ProgressWatcher` (no new delivery code); a run that settles `unanswered` triggers an
+  injected `onFailure` hook (wired to a one-off Telegram ping in `main.ts`). Cron parsing via `croner`
+  (zero-dep, well-tested).
+- **Robustness anchor:** correctness does not depend on any single doc commit landing. The durable
+  submission record is the proof a slot fired; `nextRunAt` advancement self-heals — if an advance
+  commit is transiently lost, the next tick/restart re-processes the still-due slot, finds the
+  existing submission (idempotent submit, no double-run), and advances again. Verified live.
+- **Missed-firing policy:** a slot that passed while the process was down is "missed". Default
+  `skip` advances past it without firing stale jobs; `catch-up` fires once. Configurable via
+  `SCHEDULER_MISSED_POLICY`.
+- `app/src/config.ts`: new `ScheduleSpec` type + `schedules.json` loading (validated at boot), and
+  `schedulerTickMs` / `missedFiringPolicy` config fields (`SCHEDULER_TICK_MS`,
+  `SCHEDULER_MISSED_POLICY`).
+- `app/src/core.ts`: `Scheduler` wired into `createCoreInstance()` (started after the server is up,
+  stopped on `close()`); new optional `onScheduledFailure` option.
+- `app/src/telegram.ts`: `notifyConversation(convId, text)` for one-off failure pings (distinct from
+  the run-scoped watcher).
+- `app/src/main.ts`: late-bound Telegram ref wired to `onScheduledFailure` → pings the bound chat on
+  a failed scheduled run.
+- `app/test/scheduler.test.ts` (new, live): **6 checks** — seed+fire (prompt lands in transcript,
+  nextRunAt advances), idempotent across restart (no duplicate prompt), skip-a-missed-slot (default
+  policy), and failure ping on an `unanswered` run (`no_model`).
+- `.env.example`: documents `SCHEDULER_TICK_MS`, `SCHEDULER_MISSED_POLICY`, and a `schedules.json`
+  example.
+
+Verification: `tsc --noEmit` clean; affected suites all green — config **5**, core-instance **17**,
+scheduler **6**, telegram **28**, api **91** (all live-model).
+
 ### Not yet done
 
 Post-MVP follow-up from the D14 checklist: item 7 container packaging — done (PR #31);

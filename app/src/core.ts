@@ -35,6 +35,7 @@ import { defaultModelRef, loadModelsConfig, type ModelsConfig } from "./model.ts
 import { buildRegistry } from "./registry.ts";
 import { createServer, type AppRoute } from "./server.ts";
 import { SandboxManager } from "./sandbox.ts";
+import { Scheduler, type FailedScheduleSettle, type ScheduleEntry } from "./extensions/scheduler.ts";
 
 export interface CoreInstanceOptions {
   config: AppConfig;
@@ -54,6 +55,8 @@ export interface CoreInstanceOptions {
   routes?: readonly AppRoute[];
   /** Additional bearer tokens accepted by the server's auth gate (M2.2: peer tokens for board RPC). */
   extraTokens?: () => readonly string[];
+  /** Failure delivery hook for scheduled runs that settle `unanswered` (issue #58). */
+  onScheduledFailure?: (entry: ScheduleEntry, settled: FailedScheduleSettle) => Promise<void> | void;
 }
 
 /** Minimal stable sandbox surface exposed on CoreInstance (issue #44). */
@@ -154,10 +157,22 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
   const bound = server.address();
   const actualPort = typeof bound === "object" && bound !== null ? bound.port : port;
 
+  // Scheduled checks (issue #58): durable cron-driven runs. Inert when no schedules exist.
+  const scheduler = new Scheduler({
+    harness,
+    rootConversationId: root.id,
+    declarative: config.schedules,
+    tickMs: config.schedulerTickMs,
+    missedFiringPolicy: config.missedFiringPolicy,
+    onFailure: opts.onScheduledFailure,
+  });
+  await scheduler.start();
+
   let closed = false;
   const close = async (): Promise<void> => {
     if (closed) return;
     closed = true;
+    await scheduler.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     try {
       await sandbox.disposeAll(ctx);
