@@ -1,0 +1,38 @@
+# CI for lalanikarim/engram (public repo — unlimited Linux-hosted minutes).
+#
+# Scope: runs ONLY what is hermetic — the pure-logic unit suite that needs no
+# model endpoint, no containers, no network beyond npm registry.
+# Deliberately excluded:
+#   - api.test.ts, core-instance.test.ts, scheduler.test.ts, telegram.test.ts,
+#     hardening.test.ts, sandbox.test.ts, webui.test.ts, classifier-live.test.ts
+#     — all require a live inference endpoint (OPENAI_BASE_URL) and/or a container
+#     runtime; those are host resources, not CI resources. Tracked in #66.
+# Node: engines floor is >=22.19.0.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Job id doubles as the branch-protection check name: "unit-suite".
+  unit-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit suite
+        run: npm run test:unit
