@@ -104,8 +104,8 @@ check(
   evaluateGate(minimal, "bash", { command: "cat src/server.mjs | grep reboot" }) === null,
 );
 check(
-  "node -e with SQL in a string → null",
-  evaluateGate(minimal, "bash", { command: `node -e "console.log('DROP TABLE x')"` }) === null,
+  "node -e with SQL in a string → destructive (its -e arg is live code, issue #63)",
+  evaluateGate(minimal, "bash", { command: `node -e "console.log('DROP TABLE x')"` }) === "destructive",
 );
 check(
   "printf writing a script → null (writing ≠ running)",
@@ -189,6 +189,62 @@ check("renderAction bash → command", renderAction("bash", { command: "ls -la" 
 check(
   "renderAction send_message → recipient + body",
   renderAction("send_message", { to: "bob", message: "hi" }) === "to bob\nhi",
+);
+
+console.log("issue #63: quoted payloads through code-executing heads are live code");
+check(
+  "sh -c with live rm -rf → destructive (shell head, unchanged)",
+  evaluateGate(minimal, "bash", { command: `sh -c "rm -rf /tmp/x"` }) === "destructive",
+);
+check(
+  "python3 -c payload executes the delete → destructive",
+  evaluateGate(minimal, "bash", { command: `python3 -c "import os; os.system('rm -rf /tmp/x')"` }) === "destructive",
+);
+check(
+  "node -e recursive rmSync → destructive",
+  evaluateGate(minimal, "bash", { command: `node -e "require('fs').rmSync('/tmp/x',{recursive:true})"` }) === "destructive",
+);
+check(
+  "perl -e payload executes the delete → destructive",
+  evaluateGate(minimal, "bash", { command: `perl -e "system('rm -rf /tmp/x')"` }) === "destructive",
+);
+check(
+  "ruby -e payload executes the delete → destructive",
+  evaluateGate(minimal, "bash", { command: `ruby -e "system('rm -rf /tmp/x')"` }) === "destructive",
+);
+check(
+  "deno run --eval payload executes the delete → destructive",
+  evaluateGate(minimal, "bash", { command: `deno run --eval "Deno.run({ cmd: ['sh', '-c', 'rm -rf /tmp/x'] })"` }) === "destructive",
+);
+check(
+  "docker run … inner sh -c executes the delete → destructive",
+  evaluateGate(minimal, "bash", { command: `docker run alpine sh -c "rm -rf /tmp/x"` }) === "destructive",
+);
+check(
+  "node script.js with quoted arg mentioning the delete → null (no execution flag)",
+  evaluateGate(minimal, "bash", { command: `node script.js "rm -rf /tmp/x"` }) === null,
+);
+check(
+  "python3 script.py with quoted arg mentioning the delete → null (no -c)",
+  evaluateGate(minimal, "bash", { command: `python3 script.py 'rm -rf /tmp/x'` }) === null,
+);
+
+console.log("issue #63: redirection drop narrowed to discard sinks");
+check(
+  "writing onto a device → destructive (restored)",
+  evaluateGate(minimal, "bash", { command: "echo payload > /dev/sda" }) === "destructive",
+);
+check(
+  "stderr discard sink still dropped → null",
+  evaluateGate(minimal, "bash", { command: "make build 2>/dev/stderr" }) === null,
+);
+check(
+  "fd discard sink still dropped → null",
+  evaluateGate(minimal, "bash", { command: "make test >>/dev/fd/3" }) === null,
+);
+check(
+  "device-write candidates keep the /dev target",
+  destructiveCandidates("echo payload > /dev/sda").some((c) => c.includes("/dev/sda")),
 );
 
 console.log(`\n=== RESULT: ${passed} passed, ${failed} failed ===`);
