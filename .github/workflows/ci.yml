@@ -37,33 +37,32 @@ jobs:
           node-version: 24
           cache: npm
 
-      # --ignore-scripts is load-bearing until #68 lands. The workspace `prepare` script runs
-      # `tsc -p tsconfig.build.json`, and package-lock.json records only
-      # @typescript/typescript-darwin-arm64 — so on a Linux runner TypeScript installs with no
-      # compiler binary and the install dies in getExePath.js. Verified on node:24-slim
-      # (linux-x64, the ubuntu-latest platform): plain `npm ci` exits 1 at that exact frame;
-      # `npm ci --ignore-scripts` exits 0 and the suite runs, because these tests import .ts
-      # sources directly and never consume dist/.
-      #
-      # When #68 is fixed, switch this to plain `npm ci` and add a build step:
-      #   run: npm ci
-      #   - run: npm run build
+      # #68 fixed: the root lockfile now records every TypeScript platform variant, so a Linux
+      # runner installs a real compiler. That is what lets the install step drop `--ignore-scripts`
+      # and lets `npm run build` run in CI at all — before the fix, plain `npm ci` died in
+      # getExePath.js with "Unable to resolve @typescript/typescript-linux-arm64".
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: npm ci
 
-      # Non-failing diagnostic so the platform gap stays visible in every run log instead of
-      # being re-discovered by the next Linux consumer. Flip to a hard failure once #68 merges.
+      # Compiling is the cheapest proof that the platform binary resolved, and it used to be
+      # impossible off macOS. Keep it even though the unit suite imports .ts sources directly:
+      # a build regression in dist/ output would otherwise only surface in the next release.
+      - name: Build
+        run: npm run build
+
+      # Hard failure now (it was a warning while #68 was open). If a future lockfile regeneration
+      # prunes platform variants again, this fails loudly at install-adjacent cost instead of
+      # silently breaking every Linux consumer — the exact class of defect that hid for weeks.
       - name: Lockfile platform coverage (#68)
         run: |
           node -e '
             const lock = require("./package-lock.json");
-            const ts = Object.keys(lock.packages ?? {}).filter((k) => k.includes("typescript"));
-            console.log("typescript entries:", ts.join(", ") || "none");
-            const linux = ts.filter((k) => k.includes("linux"));
-            if (linux.length === 0) {
-              console.warn("::warning title=Lockfile has no Linux TypeScript entry::npm ci cannot build on Linux (#68); install step uses --ignore-scripts as a workaround");
-            } else {
-              console.log("Linux entries present:", linux.join(", "));
+            const ts = Object.keys(lock.packages ?? {}).filter((k) => k.includes("@typescript/typescript-"));
+            const linux = ts.filter((k) => /linux-(x64|arm64)/.test(k));
+            console.log("platform entries:", ts.length, "| linux x64/arm64:", linux.join(", ") || "none");
+            if (linux.length < 2) {
+              console.error("::error title=Lockfile lost Linux TypeScript variants::npm ci cannot build on Linux (#68 regression)");
+              process.exit(1);
             }
           '
 
