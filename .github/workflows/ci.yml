@@ -1,0 +1,71 @@
+# CI for lalanikarim/engram.
+#
+# Why this file exists: branch protection on `main` requires the status check context
+# "unit-suite" (strict), and until now nothing in this repository ever reported it — there was
+# no .github/ directory at all, so zero check runs have ever appeared on main. A required check
+# that no workflow produces does not fail; it sits "Expected — waiting for status" forever, and
+# every pull request becomes unmergeable except by bypass. That is how #70 got stuck.
+#
+# Scope: only the hermetic subset. `npm run test:unit` needs no model endpoint, no network and
+# no container runtime; its sandbox-containment case self-skips where Podman is absent (it does
+# not silently pass — it prints SKIP). The full `npm test` in app/ needs network access and stays
+# a local command.
+#
+# Node 24: the suites are run as `node app/test/x.test.ts` with no loader flag, which requires
+# native type stripping (Node >= 23; 24 is what the factory sandbox runs too).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The job id IS the branch-protection check name ("unit-suite"). Renaming this job orphans the
+  # required check and re-creates the stuck-PR condition described above.
+  unit-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # --ignore-scripts is load-bearing until #68 lands. The workspace `prepare` script runs
+      # `tsc -p tsconfig.build.json`, and package-lock.json records only
+      # @typescript/typescript-darwin-arm64 — so on a Linux runner TypeScript installs with no
+      # compiler binary and the install dies in getExePath.js. Verified on node:24-slim
+      # (linux-x64, the ubuntu-latest platform): plain `npm ci` exits 1 at that exact frame;
+      # `npm ci --ignore-scripts` exits 0 and the suite runs, because these tests import .ts
+      # sources directly and never consume dist/.
+      #
+      # When #68 is fixed, switch this to plain `npm ci` and add a build step:
+      #   run: npm ci
+      #   - run: npm run build
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Non-failing diagnostic so the platform gap stays visible in every run log instead of
+      # being re-discovered by the next Linux consumer. Flip to a hard failure once #68 merges.
+      - name: Lockfile platform coverage (#68)
+        run: |
+          node -e '
+            const lock = require("./package-lock.json");
+            const ts = Object.keys(lock.packages ?? {}).filter((k) => k.includes("typescript"));
+            console.log("typescript entries:", ts.join(", ") || "none");
+            const linux = ts.filter((k) => k.includes("linux"));
+            if (linux.length === 0) {
+              console.warn("::warning title=Lockfile has no Linux TypeScript entry::npm ci cannot build on Linux (#68); install step uses --ignore-scripts as a workaround");
+            } else {
+              console.log("Linux entries present:", linux.join(", "));
+            }
+          '
+
+      - name: Unit suite
+        run: npm run test:unit
