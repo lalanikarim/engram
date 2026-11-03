@@ -51,6 +51,7 @@ export type GatesConfig = {
 /** Built-in safety floor — always active regardless of config. */
 export const DEFAULT_DESTRUCTIVE_PATTERNS: string[] = [
   "\\brm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b", // rm -rf / -fr (any order, with extras)
+  "\\brm(?:Sync|Async)\\s*\\([^)]*recursive\\s*:\\s*true", // Node fs recursive delete (issue #63)
   "\\bmkfs(\\.|\\s|$)",
   "\\bdd\\s+if=",
   ":\\(\\)\\{", // fork bomb
@@ -58,7 +59,7 @@ export const DEFAULT_DESTRUCTIVE_PATTERNS: string[] = [
   "\\bgit\\s+reset\\s+--hard\\b",
   "\\bDROP\\s+(TABLE|DATABASE|INDEX)\\b",
   "\\bTRUNCATE\\s+\\w+",
-  ">\\s*/dev/", // still guards non-bash tools (bash candidates drop /dev/* redirections first)
+  ">\\s*/dev/", // guards device writes (bash candidates drop only discard sinks, issue #63)
 ];
 
 /**
@@ -67,8 +68,37 @@ export const DEFAULT_DESTRUCTIVE_PATTERNS: string[] = [
  */
 const WEAK_WORD_COMMANDS = new Set(["reboot", "shutdown"]);
 
-/** Heads whose quoted arguments are live shell code, not data. */
-const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "eval"]);
+/**
+ * Heads whose quoted arguments are live code executed by the head, not data (issue #63).
+ * Basename → execution flag(s) that put the command in "code mode"; an empty list means any
+ * quoted argument is code (shells: -c scripts and script paths alike). Adding a new
+ * interpreter is a data change here, not a logic change.
+ */
+const CODE_INTERPRETERS = new Map<string, string[]>([
+  ["sh", []], ["bash", []], ["zsh", []], ["dash", []], ["ksh", []], ["eval", []],
+  ["python", ["-c"]], ["python3", ["-c"]], ["perl", ["-e"]], ["ruby", ["-e"]],
+  ["node", ["-e", "--eval"]], ["deno", ["--eval"]],
+]);
+
+/**
+ * Whether a simple command's quoted spans are live code (issue #63): true when some token is
+ * an interpreter head and — for flag-gated heads — one of its execution flags appears as a
+ * later argument. Scanning every token means heads hidden behind sudo/VAR= are found, and
+ * `docker run image sh -c "…"` counts: the inner `sh -c` executes the span.
+ */
+function hasLiveCodeArgs(cleaned: string): boolean {
+  const tokens = cleaned.split(/\s+/);
+  for (let i = 0; i < tokens.length; i++) {
+    const flags = CODE_INTERPRETERS.get((tokens[i] ?? "").replace(/^.*\//, ""));
+    if (flags === undefined) continue;
+    if (flags.length === 0) return true;
+    for (let j = i + 1; j < tokens.length; j++) {
+      const t = tokens[j] ?? "";
+      if (flags.some((f) => t === f || (f.startsWith("--") && t.startsWith(`${f}=`)))) return true;
+    }
+  }
+  return false;
+}
 
 export type GateTier = "destructive" | "prompt" | "auto";
 
@@ -166,17 +196,23 @@ function compilePattern(pattern: string, where: string): RegExp {
 
 /**
  * Reduce a bash command line to the simple-command texts destructive patterns match against
- * (issue #53): split on shell operators and newlines, drop /dev/* redirections (discarding
- * output is not a write), and mask quoted string literals — except when the simple command's
- * head is a shell interpreter or eval, where quoted text is live code and is also tested as
- * its own candidate. Backticks and $(...) are never masked: they execute.
+ * (issues #53/#63): split on shell operators and newlines, drop discard-sink redirections
+ * (/dev/null, /dev/stdout, /dev/stderr, /dev/fd/* — discarding output is not a write, but
+ * writes onto other devices stay as candidates), and mask quoted string literals — except
+ * when the simple command passes quoted arguments to a code-executing head (shell,
+ * python/python3 -c, node -e, deno run --eval, docker run … sh -c, …), where quoted text is
+ * live code and is also tested as its own candidate. Backticks and $(...) are never masked:
+ * they execute.
  */
 export function destructiveCandidates(command: string): string[] {
   const out: string[] = [];
   for (const segment of splitSimpleCommands(command)) {
-    const cleaned = segment.replace(/\d*\s*>>?\s*\/dev\/\S*/g, " ");
-    const head = headCommand(cleaned);
-    if (head !== null && SHELL_INTERPRETERS.has(head)) {
+    // Drop only actual discard sinks; any other /dev/* target stays (issue #63).
+    const cleaned = segment.replace(
+      /\d*\s*>>?\s*\/dev\/(?:null|stdout|stderr)(?=\s|$)|\d*\s*>>?\s*\/dev\/fd\/\S*/g,
+      " ",
+    );
+    if (hasLiveCodeArgs(cleaned)) {
       out.push(cleaned);
       for (const quoted of quotedSpans(cleaned)) out.push(quoted); // live code: test the contents too
     } else {
