@@ -168,3 +168,44 @@ acceptance rows above.
 - No classifier scoring (F) until proven necessary.
 - No changes to the self-approval safety property: only the API driver writes decisions;
   allow-rules are data written by human-driven endpoints, never by agent tools.
+
+## Effect-bearing arguments (G) — built 2026-11-04 (#69)
+
+**Problem.** The destructive floor matched against *every string argument of every call*
+(`gateArgText` → canonical JSON). That cannot distinguish doing a thing from describing it, so the
+guard blocked the ordinary tools of a pipeline: writing a test whose `finally` cleanup is
+`rmSync(dir,{recursive:true})`, editing `gates.ts` (whose pattern list literally contains
+`// rm -rf / -fr`), a reviewer's `submit_verdict` evidence quoting the payload it had just
+reproduced, and an `open_draft_pr` summary describing device-write detection. Because destructive
+keys can never be allow-listed, each one cost a fresh human acknowledgement — an unbounded false
+positive by construction.
+
+**Measured before changing anything.** All approval markers were extracted from the four real
+instance stores and attributed to the substring that matched: 18 markers, 7 distinct calls, **0**
+destructive effects. That replay is the acceptance test for this change (see
+`app/test/gates-prose-args.test.ts` for the recorded payloads).
+
+**Change.** A call is judged on the arguments that carry its *effect*:
+
+- `bash` — unchanged shell-aware candidates (#53/#63).
+- tools with effect paths (`DEFAULT_DESTRUCTIVE_ARGS`, extendable per deployment through
+  `gates.json: destructiveArgs`) — only the values at those paths. Built-ins are the shipped coding
+  tools: `write(path)`, `edit(edits[].path, path)`, `multi_edit(...)`. A prose-only consumer tool is
+  declared with `[]` meaning "nothing this call carries can be destructive".
+- everything else — whole canonical arg text, unchanged. Unknown and custom tools never get weaker
+  by default; narrowing is opt-in and logged loudly at startup, like the containment declaration.
+
+**What keeps the floor honest.** `PATH_DESTRUCTIVE_PATTERNS` classifies targets that are destructive
+by identity rather than payload: block devices, `.ssh/`, `authorized_keys`, account databases, and —
+the part that matters most — content executed later (`~/.bashrc` and friends, `.git/hooks/`, cron,
+systemd, LaunchAgents). Writing `rm -rf /` into `~/.bashrc` is still DESTRUCTIVE although no command
+ran, and the path says so without reading the payload. Discard sinks stay non-destructive, per #63.
+
+**Result on the recorded production calls:** 7/7 blocked under this change's parent commit → 0/7
+with the built-ins plus a consumer declaring its own prose tools, while all ten hand-checked
+effect-bearing cases (force-push, interpreter-wrapped `rmSync`, `write /dev/sda`,
+`authorized_keys`, `.bashrc`, a git hook, `DROP TABLE`, and an unknown tool carrying `rm -rf`) stay
+DESTRUCTIVE.
+
+**Unchanged invariants.** Destructive actions are still individually approved and never allow-listed;
+the classifier can still only escalate; the agent still cannot write its own decisions.

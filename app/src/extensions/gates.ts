@@ -45,6 +45,13 @@ export type GatesConfig = {
   tiers: GateSpec[];
   /** Extra destructive patterns, added to the built-in list (never removed). */
   destructivePatterns?: string[];
+  /**
+   * Per-tool effect-bearing argument paths for the destructive floor (issue #69). Merged over
+   * DEFAULT_DESTRUCTIVE_ARGS: a tool named here replaces that tool's list, so a deployment can narrow its own
+   * tools without touching the shipped ones. An empty list means "this call carries no destructive argument" —
+   * for prose-only tools (record a verdict, open a draft PR) where nothing about the payload can be destructive.
+   */
+  destructiveArgs?: Record<string, string[]>;
   classifier?: ClassifierSpec;
 };
 
@@ -60,6 +67,59 @@ export const DEFAULT_DESTRUCTIVE_PATTERNS: string[] = [
   "\\bDROP\\s+(TABLE|DATABASE|INDEX)\\b",
   "\\bTRUNCATE\\s+\\w+",
   ">\\s*/dev/", // guards device writes (bash candidates drop only discard sinks, issue #63)
+];
+
+/**
+ * Effect-bearing argument paths for the destructive floor (issue #69).
+ *
+ * The floor used to scan every string argument of every tool call, which cannot tell doing a thing from describing
+ * it. In production that meant: writing a test whose cleanup is `rmSync(dir,{recursive:true})`, a review verdict
+ * quoting the payload it had just reproduced, and a PR summary mentioning `/dev/sda` were each classified
+ * DESTRUCTIVE — and because destructive keys can never be allow-listed, every one cost a fresh human approval.
+ * Across four real stores: 18 markers, 7 distinct causes, **0** destructive effects.
+ *
+ * The principle is not new — #53 introduced "words that are destructive only when they ARE the command being run"
+ * for bash, and #63 extended it to quoted arguments of code-executing heads. This applies the same distinction to
+ * non-bash tools: a call is judged on the arguments that carry its effect.
+ *
+ * Path syntax: `.` nests, `[]` maps over an array (`edits[].path`). A tool listed here is scanned ONLY at those
+ * paths, so this table stays short and reviewed — and it is only safe alongside PATH_DESTRUCTIVE_PATTERNS below,
+ * which keeps the targets that are dangerous by identity (devices, credentials, files executed later) destructive
+ * regardless of what the payload says.
+ *
+ * A tool NOT listed here keeps today's behavior: every string argument is scanned. Unknown and custom tools never
+ * become weaker by default — narrowing is opt-in, here or in gates.json.
+ */
+export const DEFAULT_DESTRUCTIVE_ARGS: Record<string, string[]> = {
+  // CodingTools: the effect is WHICH file changes, not what the new text happens to contain.
+  write: ["path"],
+  edit: ["edits[].path", "path"],
+  multi_edit: ["edits[].path", "path"],
+};
+
+/**
+ * Targets that are destructive by identity rather than by payload (issue #69). Matched against the same candidates
+ * the floor already judges, so `write {path:"/dev/sda"}` and an edit onto `.ssh/authorized_keys` stay DESTRUCTIVE
+ * while the identical call writing `app/test/x.test.ts` does not.
+ *
+ * Two families, and the second is what makes narrowing honest rather than merely permissive:
+ *   (a) the target IS the damage — block devices, key material, account databases;
+ *   (b) content that executes later — shell rc files, git hooks, cron/systemd/launchd units. Writing `rm -rf /`
+ *       into `~/.bashrc` is destructive even though no command ran; the path says so without reading the payload.
+ *
+ * `/dev/null`, `/dev/stdout`, `/dev/stderr` and `/dev/fd/*` are deliberately absent: they are discard sinks, and
+ * #63 established that discarding output is not a write.
+ */
+export const PATH_DESTRUCTIVE_PATTERNS: string[] = [
+  "(^|/)/dev/(sd[a-z]|nvme|disk|rd|md|mapper)([0-9]|$)", // whole disks and partitions
+  "(^|/)[.]ssh(/|$)", // key material and authorized_keys live here
+  "(^|/)(authorized_keys|authorized_keys2)$",
+  "^/etc/(passwd|shadow|group|sudoers)([.]|$)",
+  "^/etc/ssh/sshd_config$",
+  "(^|/)/etc/(cron|systemd)/",
+  "(^|/)[.]git/hooks/",
+  "(^|/)[.](bashrc|bash_profile|bash_login|zshrc|zshenv|zprofile|profile)$",
+  "(^|/)Library/Launch(Agents|Daemons)/",
 ];
 
 /**
@@ -114,6 +174,10 @@ export type CompiledGates = {
   /** tool → auto patterns + default tier (+ optional containment declaration); absent = ungated. */
   tiers: Map<string, { auto: RegExp[]; def: GateTier; containment?: "sandbox" }>;
   destructive: RegExp[];
+  /** Targets destructive by identity (issue #69): devices, credentials, later-executed files. */
+  pathDestructive: RegExp[];
+  /** tool → effect-bearing arg paths scanned by the floor; absent = scan every string arg (#69). */
+  destructiveArgs: Map<string, string[]>;
   classifier: CompiledClassifier;
 };
 
@@ -165,7 +229,27 @@ export function compileGates(config: GatesConfig | null): CompiledGates {
   const destructive = [...DEFAULT_DESTRUCTIVE_PATTERNS, ...(config?.destructivePatterns ?? [])].map((p) =>
     compilePattern(p, "<destructive>"),
   );
-  return { tiers, destructive, classifier: compileClassifier(config?.classifier) };
+  const pathDestructive = PATH_DESTRUCTIVE_PATTERNS.map((p) => compilePattern(p, "<path-destructive>"));
+
+  // Effect paths: built-ins, then per-tool overrides from config. An empty array is meaningful ("nothing this call
+  // carries can be destructive") and must not be confused with an absent entry, which means "scan everything".
+  const destructiveArgs = new Map<string, string[]>(Object.entries(DEFAULT_DESTRUCTIVE_ARGS));
+  for (const [tool, paths] of Object.entries(config?.destructiveArgs ?? {})) {
+    if (!Array.isArray(paths) || paths.some((p) => typeof p !== "string")) {
+      throw new Error(`gates.json: destructiveArgs["${tool}"] must be an array of arg paths (strings)`);
+    }
+    destructiveArgs.set(tool, [...paths]);
+  }
+  // Loud at startup, like the containment declaration: a narrowed floor is a posture change and must not be visible
+  // only in a diff. Prose-only tools are named as such because those are the calls left with no floor at all.
+  const narrowed = [...destructiveArgs.entries()].map(([t, p]) => `${t}(${p.join(",") || "nothing scanned"})`);
+  if (narrowed.length > 0) {
+    console.warn(
+      `[gates] destructive floor judges effect-bearing args only for: ${narrowed.join(", ")} — ` +
+        "payload/prose is not scanned for these tools; device/credential/later-executed paths stay destructive",
+    );
+  }
+  return { tiers, destructive, pathDestructive, destructiveArgs, classifier: compileClassifier(config?.classifier) };
 }
 
 function compileClassifier(spec: ClassifierSpec | undefined): CompiledClassifier {
@@ -338,12 +422,46 @@ function maskQuotes(text: string): string {
 }
 
 /**
- * Destructive check (issue #53): patterns match simple-command candidates for bash, raw text
- * otherwise; reboot/shutdown count only as the command being run, never as a mentioned word.
+ * The strings the destructive floor judges for one call (issue #69). Three cases, in order:
+ *   - `bash`: shell-aware simple-command candidates, exactly as #53/#63 built them.
+ *   - a tool with effect-bearing paths (`DEFAULT_DESTRUCTIVE_ARGS` or gates.json): only the values at those paths.
+ *     This is what stops file content and prose fields from being read as commands.
+ *   - anything else: the whole canonical arg text, unchanged — so an unknown tool taking a `sql` or `command`
+ *     string is still judged on it. Failing safe here means failing strict.
  */
-function isDestructive(gates: CompiledGates, tool: string, text: string): boolean {
-  const candidates = tool === "bash" ? destructiveCandidates(text) : [text];
+export function gateCandidates(gates: CompiledGates, tool: string, args: unknown): string[] {
+  if (tool === "bash") return destructiveCandidates(gateArgText(tool, args));
+  const paths = gates.destructiveArgs.get(tool);
+  if (paths === undefined) return [gateArgText(tool, args)];
+  const out: string[] = [];
+  for (const p of paths) for (const v of valuesAtArgPath(args, p)) out.push(v);
+  return out;
+}
+
+/** Resolve an arg path (`path`, `a.b`, `edits[].path`) to the string values it names. Missing → no candidate. */
+function valuesAtArgPath(value: unknown, path: string): string[] {
+  const [head, ...rest] = path.split(".");
+  if (!head) return [];
+  const isMapped = head.endsWith("[]");
+  const key = isMapped ? head.slice(0, -2) : head;
+  const container = (value ?? {}) as Record<string, unknown>;
+  const next = container[key];
+  if (isMapped && !Array.isArray(next)) return [];
+  const step = isMapped ? (next as unknown[]) : [next];
+  const here = rest.length === 0 ? step : step.flatMap((item) => valuesAtArgPath(item, rest.join(".")));
+  return here.filter((v): v is string => typeof v === "string" && v.length > 0);
+}
+
+/**
+ * Destructive check (issues #53/#63/#69): patterns match the call's candidates — simple-command texts for bash,
+ * effect-bearing argument values for narrowed tools, raw arg text otherwise. `reboot`/`shutdown` count only as the
+ * command being run, never as a mentioned word.
+ */
+function isDestructive(gates: CompiledGates, candidates: string[]): boolean {
   if (gates.destructive.some((p) => candidates.some((c) => p.test(c)))) return true;
+  // Identity targets (#69): judged on candidates only, never on prose — a PR summary that quotes
+  // "~/.ssh/authorized_keys" is not an attempt to write it.
+  if (gates.pathDestructive.some((c2) => candidates.some((c) => c2.test(c)))) return true;
   return candidates.some((c) => {
     const head = headCommand(c);
     return head !== null && WEAK_WORD_COMMANDS.has(head);
@@ -369,7 +487,7 @@ export function applyContainment(
 /** First match wins: destructive > auto pattern > tool default. null = ungated. */
 export function evaluateGate(gates: CompiledGates, tool: string, args: unknown): GateTier | null {
   const text = gateArgText(tool, args);
-  if (isDestructive(gates, tool, text)) return "destructive";
+  if (isDestructive(gates, gateCandidates(gates, tool, args))) return "destructive";
   const spec = gates.tiers.get(tool);
   if (!spec) return null;
   if (spec.auto.some((p) => p.test(text))) return "auto";
