@@ -142,10 +142,14 @@ export async function createCoreInstance(opts: CoreInstanceOptions): Promise<Cor
     console.error("[engram] sandbox orphan sweep failed:", (e as Error).message);
   }
 
-  const root = await harness.root(ctx, {
-    agent: { model: await defaultModelRef(modelsConfig), thinkingLevel: "medium", ...(opts.rootAgent ?? {}) },
-    init: opts.rootInit,
-  });
+  // The caller asserts what this process's root agent is configured to be; that assertion must
+  // hold after every start. pi-durable's Harness.root() applies `agent` only when it CREATES the
+  // root conversation — for an existing root it returns early and silently discards the change
+  // (issue #65). Re-assert it here in its own commit: configure() replaces exactly the given
+  // fields, and a document write of an equal value records no change, so this is idempotent.
+  const rootAgent: AgentChange = { model: await defaultModelRef(modelsConfig), thinkingLevel: "medium", ...(opts.rootAgent ?? {}) };
+  const root = await harness.root(ctx, { agent: rootAgent, init: opts.rootInit });
+  await root.configure(rootAgent, ctx);
 
   const host = opts.host ?? config.host;
   const port = opts.port ?? config.port;
