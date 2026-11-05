@@ -74,7 +74,7 @@ check(
 );
 check(
   "write ~/.bashrc is destructive — content executes at next login (#69 family b)",
-  evaluateGate(gates, "write", { path: "/Users/dev/.bashrc", content: "rm -rf /" }) === "destructive",
+  evaluateGate(gates, "write", { path: "/Users/dev/.bashrc", content: "rm -rf ./node_modules" }) === "destructive",
 );
 check(
   "edit .git/hooks/pre-commit is destructive",
@@ -132,7 +132,7 @@ check("built-in effect paths cover the shipped coding tools", DEFAULT_DESTRUCTIV
 check("path patterns are non-empty and compiled", PATH_DESTRUCTIVE_PATTERNS.length > 0 && compileGates({ tiers: [] }).pathDestructive.length === PATH_DESTRUCTIVE_PATTERNS.length);
 check(
   "candidates for a narrowed tool contain ONLY the effect path values",
-  JSON.stringify(gateCandidates(gates, "write", { path: "a/b.ts", content: "rm -rf /" })) === JSON.stringify(["a/b.ts"]),
+  JSON.stringify(gateCandidates(gates, "write", { path: "a/b.ts", content: "rm -rf ./node_modules" })) === JSON.stringify(["a/b.ts"]),
 );
 check(
   "candidates for an undeclared tool are the whole arg text",
