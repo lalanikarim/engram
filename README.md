@@ -106,7 +106,7 @@ single source of truth (spec: [`docs/plans/model-catalog.md`](docs/plans/model-c
 
 - **LAN-only by design:** the agent makes outbound connections only (model endpoint, Telegram long polling); no inbound ports required.
 - **Untrusted input:** web content is rendered into transcripts as delimited untrusted data; the researcher role has no shell/write tools — the injection probe in `10-bench.mjs` confirms containment.
-- **Approval gates** are the control boundary: every external side effect passes a durable `beforeTool` hook; the agent cannot self-approve and decisions survive crashes.
+- **Approval gates** are the control boundary: every external side effect passes a durable `beforeTool` hook; the agent cannot self-approve and decisions survive crashes. Operating the destructive floor (`gates.json: destructiveArgs`) is documented in [`docs/gates.md`](docs/gates.md).
 - **Sandboxing:** generated/external code runs only in disposable Podman containers with no host secrets, limited egress, and scoped mounts.
 - **Secrets hygiene:** keys live only in gitignored `poc/.env` / container env — never in transcripts or committed files.
 

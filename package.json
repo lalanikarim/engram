@@ -26,6 +26,6 @@
   "scripts": {
     "build": "npm run build --workspace app",
     "prepare": "npm run build",
-    "test:unit": "node app/test/model-catalog.test.ts && node app/test/gates.test.ts && node app/test/gates-prose-args.test.ts && node app/test/approval-rules.test.ts && node app/test/config.test.ts && node app/test/sandbox-containment.test.ts && node app/test/root-agent-reapply.test.ts"
+    "test:unit": "node app/test/model-catalog.test.ts && node app/test/gates.test.ts && node app/test/gates-prose-args.test.ts && node app/test/approval-rules.test.ts && node app/test/config.test.ts && node app/test/sandbox-containment.test.ts && node app/test/root-agent-reapply.test.ts && node app/test/gates-docs-verification.test.ts"
   }
 }
