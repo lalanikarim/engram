@@ -110,6 +110,28 @@ single source of truth (spec: [`docs/plans/model-catalog.md`](docs/plans/model-c
 - **Sandboxing:** generated/external code runs only in disposable Podman containers with no host secrets, limited egress, and scoped mounts.
 - **Secrets hygiene:** keys live only in gitignored `poc/.env` / container env — never in transcripts or committed files.
 
+## Versioning
+
+**Git tags are the version truth.** `v0.2.4` is the current release; `git describe --tags` is how you ask what you
+are running. `package.json` reports `"version": "0.2.0"` and that is **deliberate, not stale**: nothing in `app/`
+reads it, no workflow publishes to npm, and consumers pin by submodule gitlink (drydock vendors this repo at a
+tag). The `engram@0.2.0` line npm prints when a script runs is that unused field — not release identity.
+
+Cutting a release, as done for v0.2.1–v0.2.4:
+
+```bash
+npm run build && npm run test:unit        # green at the commit you intend to ship
+git tag -a v0.2.5 -m "v0.2.5: <one-line summary>"   # annotated, on main
+git push --follow-tags origin main
+gh release create v0.2.5 --title "v0.2.5 — <headline>" --notes-file <notes.md>
+```
+
+Release notes here carry evidence (commands and their output), not adjectives — see v0.2.4 for the pattern,
+including the part where a test turned out to be executed by no CI job.
+
+If this ever changes — npm publish, or a version string surfaced in CLI output — sync `package.json` in the same
+change that needs it and delete this section, because at that point drift becomes a bug rather than a curiosity.
+
 ## Layout
 
 ```
