@@ -173,7 +173,7 @@ check(
   "redirections to /dev/* are dropped",
   destructiveCandidates("npm ci >/dev/null 2>&1").every((c) => !c.includes("/dev/")),
 );
-check("headCommand skips env assignments and sudo", headCommand("FOO=bar sudo rm -rf /") === "rm");
+check("headCommand skips env assignments and sudo", headCommand("FOO=bar sudo rm -rf ./build") === "rm");
 check("headCommand basenames paths", headCommand("/bin/bash -c x") === "bash");
 
 console.log("arg rendering");
