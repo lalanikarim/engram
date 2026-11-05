@@ -75,12 +75,12 @@ check(
 
 console.log("# worked-example evaluations (docs/gates.md § Worked example)");
 check(
-  "write test file whose content is 'rm -rf /' → prompt (content is text, not execution)",
-  evaluateGate(gates, "write", { path: "app/test/x.test.ts", content: "rm -rf /" }) === "prompt",
+  "write test file whose content is 'rm -rf ./node_modules' → prompt (content is text, not execution)",
+  evaluateGate(gates, "write", { path: "app/test/x.test.ts", content: "rm -rf ./node_modules" }) === "prompt",
 );
 check(
-  "write /Users/dev/.bashrc with 'rm -rf /' → destructive (target is destructive by identity)",
-  evaluateGate(gates, "write", { path: "/Users/dev/.bashrc", content: "rm -rf /" }) === "destructive",
+  "write /Users/dev/.bashrc with 'rm -rf ./node_modules' → destructive (target is destructive by identity)",
+  evaluateGate(gates, "write", { path: "/Users/dev/.bashrc", content: "rm -rf ./node_modules" }) === "destructive",
 );
 check(
   "edit whose oldText quotes the pattern list → prompt (only edits[].path is scanned)",
@@ -93,7 +93,7 @@ check(
   evaluateGate(gates, "submit_verdict", {
     issueNumber: 69,
     verdict: "fail",
-    evidence: ['sh -c "rm -rf /tmp/x"'],
+    evidence: ['sh -c "rm -rf ./node_modules"'],
   }) === "prompt",
 );
 check(
@@ -104,7 +104,7 @@ check(
 console.log("# the strict default and its failure modes");
 check(
   "undeclared custom tool carrying rm -rf in a payload arg → destructive (narrowing is opt-in)",
-  evaluateGate(gates, "some_future_tool", { command: "rm -rf /tmp/x" }) === "destructive",
+  evaluateGate(gates, "some_future_tool", { command: "rm -rf ./node_modules" }) === "destructive",
 );
 check(
   "undeclared tool with no tier and harmless args → ungated (null)",
@@ -115,7 +115,7 @@ check(
   evaluateGate(
     compileGates({ tiers: [{ tool: "write", default: "prompt" }], destructiveArgs: { write: [] } }),
     "write",
-    { path: "/Users/dev/.bashrc", content: "rm -rf /" },
+    { path: "/Users/dev/.bashrc", content: "rm -rf ./node_modules" },
   ) === "prompt",
 );
 

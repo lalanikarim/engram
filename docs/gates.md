@@ -71,10 +71,10 @@ With this config:
 
 | Call | Tier | Why |
 |---|---|---|
-| `write {path:"app/test/x.test.ts", content:"rm -rf /"}` | `prompt` | Only `path` is scanned; the content is text, not execution. |
-| `write {path:"/Users/dev/.bashrc", content:"rm -rf /"}` | `destructive` | The *target* is destructive by identity (see below) — payload never read. |
+| `write {path:"app/test/x.test.ts", content:"rm -rf ./node_modules"}` | `prompt` | Only `path` is scanned; the content is text, not execution. |
+| `write {path:"/Users/dev/.bashrc", content:"rm -rf ./node_modules"}` | `destructive` | The *target* is destructive by identity (see below) — payload never read. |
 | `edit {edits:[{path:"app/src/extensions/gates.ts", oldText:"\\brm\\s+…"}]}` | `prompt` | Only each edit's `path` is scanned; quoting the pattern list is not a command. |
-| `submit_verdict {verdict:"fail", evidence:["sh -c \"rm -rf /tmp/x\""]}` | `prompt` | `[]` means no floor at all; the declared tier still applies. |
+| `submit_verdict {verdict:"fail", evidence:["sh -c \"rm -rf ./node_modules\""]}` | `prompt` | `[]` means no floor at all; the declared tier still applies. |
 | `db_exec {sql:"DROP TABLE users"}` (never declared) | `destructive` | Absent entry → every string arg is scanned; strict default preserved. |
 
 One replacement rule to internalise: naming a tool in `destructiveArgs`
@@ -120,8 +120,8 @@ permissive — writing a dangerous line into a file that runs at next login is
 destruction even though no command ran:
 
 ```console
-write {path:"/Users/dev/.bashrc", content:"rm -rf /"}   → DESTRUCTIVE   // executes at next login
-write {path:"app/test/x.test.ts", content:"rm -rf /"}   → not           // text is not execution
+write {path:"/Users/dev/.bashrc", content:"rm -rf ./node_modules"}   → DESTRUCTIVE   // executes at next login
+write {path:"app/test/x.test.ts", content:"rm -rf ./node_modules"}   → not           // text is not execution
 ```
 
 (Discard sinks `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/*` are
