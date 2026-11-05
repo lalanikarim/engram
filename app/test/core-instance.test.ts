@@ -2,6 +2,7 @@
 // deterministic building block — consumer extensions reach the root conversation,
 // close() tears down fully and idempotently, and two instances coexist in one process.
 // Requires the same local model endpoint as the other live suites (poc/.env or env).
+// manual-only: needs the live model endpoint (same as api.test.ts); run with npm run test:live:model
 import assert from "node:assert";
 import http from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

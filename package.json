@@ -22,10 +22,16 @@
   "files": [
     "app"
   ],
-  "workspaces": ["app"],
+  "workspaces": [
+    "app"
+  ],
   "scripts": {
     "build": "npm run build --workspace app",
     "prepare": "npm run build",
-    "test:unit": "node app/test/model-catalog.test.ts && node app/test/gates.test.ts && node app/test/gates-prose-args.test.ts && node app/test/approval-rules.test.ts && node app/test/config.test.ts && node app/test/sandbox-containment.test.ts && node app/test/root-agent-reapply.test.ts && node app/test/gates-docs-verification.test.ts"
+    "test:unit": "node app/test/model-catalog.test.ts && node app/test/gates.test.ts && node app/test/gates-prose-args.test.ts && node app/test/approval-rules.test.ts && node app/test/config.test.ts && node app/test/sandbox-containment.test.ts && node app/test/root-agent-reapply.test.ts && node app/test/gates-docs-verification.test.ts && node app/test/classifier.test.ts && node app/test/script-coverage.test.ts",
+    "test:live:model": "node app/test/core-instance.test.ts && node app/test/scheduler.test.ts && node app/test/classifier-live.test.ts && node app/test/api.test.ts && node app/test/telegram.test.ts",
+    "test:live:sandbox": "node app/test/sandbox.test.ts && node app/test/hardening.test.ts",
+    "test:live:webui": "node app/test/webui.test.ts",
+    "test:all": "npm run test:unit && npm run test:live:model && npm run test:live:sandbox && npm run test:live:webui"
   }
 }

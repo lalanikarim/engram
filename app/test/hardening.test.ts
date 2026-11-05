@@ -8,6 +8,7 @@
 //
 // Requires the local model endpoint; part B additionally requires Podman.
 // Run with: node test/hardening.test.ts
+// manual-only: needs the live model, and Podman for the SIGKILL/crash-recovery case; run with npm run test:live:sandbox
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

@@ -7,6 +7,7 @@
 //   T5 durable state file (bindings + offset)
 //   T6 /model picker: provider buttons → model buttons → durable switch
 //   T7 approvals: "Always allow" button → persistent rule
+// manual-only: live model + in-process mock Bot API; GitHub runners have no model endpoint; run with npm run test:live:model
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -3,6 +3,7 @@
 // pending-approvals panel; live tool output. Drives the real SPA in headless Chromium
 // against a real server + local model. Playwright is imported from the shared
 // headless-browser-checker skill install (no repo dependency).
+// manual-only: needs Chromium from the headless-browser-checker skill path plus the live model endpoint; run with npm run test:live:webui
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

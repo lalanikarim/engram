@@ -110,6 +110,24 @@ single source of truth (spec: [`docs/plans/model-catalog.md`](docs/plans/model-c
 - **Sandboxing:** generated/external code runs only in disposable Podman containers with no host secrets, limited egress, and scoped mounts.
 - **Secrets hygiene:** keys live only in gitignored `poc/.env` / container env — never in transcripts or committed files.
 
+## Testing
+
+Four tiers, because only one of them can run on a GitHub runner:
+
+```bash
+npm run test:unit          # 171 checks — hermetic; this is what CI's required `unit-suite` runs
+npm run test:live:model    # 151 checks — needs the model endpoint (poc/.env)
+npm run test:live:sandbox  # 29 checks  — needs Podman + the sandbox image
+npm run test:live:webui    # 20 checks  — needs Chromium
+npm run test:all           # everything, ~4 min with local inference — cut a tag from this
+```
+
+Which file belongs in which tier is not tribal knowledge: `app/test/script-coverage.test.ts` runs in CI and fails
+the build if an `app/test/*.test.ts` is collected by nothing the workflow actually invokes and carries no
+`// manual-only:` marker. That check exists because nine suites — **213 assertions, all passing** — ran nowhere for
+months, including the containment and hardening suites the safety story leans on ([#78](https://github.com/lalanikarim/engram/issues/78)).
+Details, timings and the rules for adding a test: [`docs/testing.md`](docs/testing.md).
+
 ## Versioning
 
 **Git tags are the version truth.** `v0.2.4` is the current release; `git describe --tags` is how you ask what you
@@ -120,7 +138,8 @@ tag). The `engram@0.2.0` line npm prints when a script runs is that unused field
 Cutting a release, as done for v0.2.1–v0.2.4:
 
 ```bash
-npm run build && npm run test:unit        # green at the commit you intend to ship
+npm run build && npm run test:all         # green at the commit you intend to ship (~4 min with local inference;
+                                          #  test:unit alone if this host has no model endpoint)
 git tag -a v0.2.5 -m "v0.2.5: <one-line summary>"   # annotated, on main
 git push --follow-tags origin main
 gh release create v0.2.5 --title "v0.2.5 — <headline>" --notes-file <notes.md>

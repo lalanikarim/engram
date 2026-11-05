@@ -5,6 +5,7 @@
 //   - a fired slot never double-runs across a restart (idempotent requestId)
 //   - a slot that passed while down is skipped by default (no stale jobs)
 //   - a run that settles `unanswered` triggers the injected failure hook
+// manual-only: in-process but needs the live model endpoint to settle a scheduled run; run with npm run test:live:model
 import assert from "node:assert";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
