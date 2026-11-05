@@ -10,6 +10,7 @@
 //   3. agent writes + cats a file in the sandbox conversation → file lands on the host workspace
 //   4. containment guard: write tool cannot escape the workspace (permission_denied, no host file)
 //   5. container is disposed when the run ends (disposable per task) and a fresh one works for the next run
+// manual-only: needs Podman + the sandbox image and the live model endpoint; run with npm run test:live:sandbox
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

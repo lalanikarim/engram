@@ -13,6 +13,7 @@
 //   8. subagents: parallel delegate fan-out (researcher + worker)
 //   9. config-driven HTTP tool
 //  10. steering a running conversation
+// manual-only: spawns a real server and needs the live model endpoint (poc/.env); run with npm run test:live:model
 import { spawn, type ChildProcess } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

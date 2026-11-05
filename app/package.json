@@ -26,7 +26,7 @@
     "start": "node src/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
-    "test": "node test/model-catalog.test.ts && node test/gates.test.ts && node test/approval-rules.test.ts && node test/config.test.ts && node test/sandbox-containment.test.ts && node test/core-instance.test.ts && node test/scheduler.test.ts && node test/api.test.ts && node test/telegram.test.ts"
+    "test": "echo \"app/: test tiers live in the repo root \u2014 'npm run test:unit' is the hermetic suite CI runs; 'npm run test:live:model|sandbox|webui' need a live model (see docs/testing.md)\" && npm run test:unit --prefix .."
   },
   "dependencies": {
     "@earendil-works/chord": "1.3.0",

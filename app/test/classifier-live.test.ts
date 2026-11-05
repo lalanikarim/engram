@@ -5,6 +5,7 @@
 // normal approve → retry → executed flow must still work. Classification failures are fail-safe
 // (plain prompt tier), so this suite asserts the happy path; if the loaded model drifts and
 // answers without calling bash, one corrective round is retried.
+// manual-only: risk-scoring end to end against the live model; run with npm run test:live:model
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
